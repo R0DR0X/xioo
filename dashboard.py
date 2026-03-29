@@ -26,14 +26,13 @@ PRODUCT_COLORS = {
 
 # ── UT0 Estáticos (Precio de Equilibrio) ─────────────────────
 UT0_FIXED = {
-    "ALAS CONGELADAS": 2046.96,
+    "ALAS": 2046.96,
     "ALAS COCIDAS": None,
-    "FILETE CONGELADO": 2048.63,
+    "FILETE": 2048.63,
     "FILETE PRECOCIDO": 2418.63,
-    "NUCA": 2168.63,
-    "REJOS CONGELADOS": 2038.63,
-    "TENTACULO": 2038.63,
-    "REPRODUCTOR": 2008.63
+    "NUCAS": 2168.63,
+    "REJOS": 2038.63,
+    "REJOS OR": 2008.63
 }
 
 # ── CSS ──────────────────────────────────────────────────────
@@ -204,7 +203,7 @@ def load_inventario():
 
 @st.cache_data
 def load_cxc():
-    """Load CxC from Sheet1: USD HOMOL + Días Atrasados, filtered to EXPORTACIÓN"""
+    """Load CxC independent rows from Sheet1: Cliente, Nº documento, Deuda (USD HOMOL), Días Atrasados"""
     path = os.path.join(os.path.dirname(__file__), "INPUT", "CxC al 25-3-2026.xlsx")
     if not os.path.exists(path): return pd.DataFrame()
     wb = openpyxl.load_workbook(path, data_only=True)
@@ -212,28 +211,28 @@ def load_cxc():
     rows = []
     for r in range(2, ws.max_row + 1):
         unidad = ws.cell(r, 11).value  # K = UNIDAD DE NEGOCIO
+        # Filter strict: Only EXPORTACIÓN and positive values (>0)
         if not unidad or 'EXPORT' not in str(unidad).upper():
             continue
-        nombre = ws.cell(r, 2).value   # B = Nombre de cliente
         usd_homol = ws.cell(r, 16).value  # P = USD HOMOL
-        dias_q = ws.cell(r, 17).value  # Q = DÍAS ATRASADOS
+        if not usd_homol or float(usd_homol) <= 0:
+            continue
+        
+        nombre = ws.cell(r, 2).value      # B = Nombre de cliente
+        n_doc = ws.cell(r, 4).value       # D = Nº documento
+        usd_homol = ws.cell(r, 16).value  # P = USD HOMOL
+        dias_q = ws.cell(r, 17).value     # Q = DÍAS ATRASADOS
         if not nombre: continue
         rows.append({
             'Cliente': str(nombre).strip(),
-            'USD_HOMOL': abs(float(usd_homol)) if usd_homol else 0,
-            'Dias_Atrasados': float(dias_q) if (dias_q is not None) else 0,
+            'N_Doc': str(n_doc).strip() if n_doc else '—',
+            'Deuda_Pendiente': float(usd_homol),
+            'Dias_Atrasados': float(dias_q) if dias_q is not None else 0,
         })
     wb.close()
     if not rows: return pd.DataFrame()
     df = pd.DataFrame(rows)
-    # Aggregate by client
-    cxc_agg = df.groupby('Cliente').agg({
-        'USD_HOMOL': 'sum',
-        'Dias_Atrasados': 'mean',
-    }).reset_index()
-    cxc_agg.columns = ['Cliente', 'Deuda_USD', 'Dias_Atraso_Prom']
-    cxc_agg = cxc_agg.sort_values('Deuda_USD', ascending=False)
-    return cxc_agg
+    return df.sort_values(['Cliente', 'Deuda_Pendiente'], ascending=[True, False])
 
 @st.cache_data
 def load_td_tables():
@@ -660,7 +659,7 @@ with tab6:
     monthly_f['mes_str'] = monthly_f['MES'].astype(str)
     monthly_c['mes_str'] = monthly_c['MES'].astype(str)
     fig_h = go.Figure()
-    fig_h.add_trace(go.Scatter(x=monthly_pf['mes_str'], y=monthly_pf['U$ FOB Tot'], name='Fresco + Cocido', line=dict(color=C['white'], width=3), mode='lines+markers'))
+    # fig_h.add_trace(go.Scatter(x=monthly_pf['mes_str'], y=monthly_pf['U$ FOB Tot'], name='Fresco + Cocido', line=dict(color=C['white'], width=3), mode='lines+markers'))
     fig_h.add_trace(go.Scatter(x=monthly_f['mes_str'], y=monthly_f['U$ FOB Tot'], name='Fresco', line=dict(color=C['green'], width=2), mode='lines+markers'))
     fig_h.add_trace(go.Scatter(x=monthly_c['mes_str'], y=monthly_c['U$ FOB Tot'], name='Cocido', line=dict(color=C['orange'], width=2), mode='lines+markers'))
     fig_h.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
@@ -809,7 +808,7 @@ with tab8:
 
         # KPI cards
         st.markdown(f"""<div class="kpi-row">
-            <div class="kpi-card c1"><div class="kpi-label">CLIENTES ACTIVOS</div><div class="kpi-value">{n_cli}</div><div class="kpi-sub">{n_rentable} rentables</div></div>
+            <div class="kpi-card c1"><div class="kpi-label">TM VENDIDAS</div><div class="kpi-value">{df_final_cli['TM_Vendidas'].sum():,.1f}</div><div class="kpi-sub">Total Periodo</div></div>
             <div class="kpi-card c2"><div class="kpi-label">VENTA CFR TOTAL</div><div class="kpi-value">{fmt_usd(total_cfr_cli)}</div><div class="kpi-sub">Total periodo</div></div>
             <div class="kpi-card c3"><div class="kpi-label">UTILIDAD NETA</div><div class="kpi-value">{fmt_usd(total_util_cli)}</div><div class="kpi-sub">{'🟢' if total_util_cli > 0 else '🔴'} Total periodo</div></div>
             <div class="kpi-card c4"><div class="kpi-label">MARGEN NETO</div><div class="kpi-value">{total_mg_cli:.1f}%</div><div class="kpi-sub">{'🟢' if total_mg_cli > 0 else '🔴'} Ponderado</div></div>
@@ -855,22 +854,22 @@ with tab8:
         st.plotly_chart(fig_cli_bar, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── CxC section (new: from Sheet1 with USD HOMOL + Días Atrasados) ──
+    # ── CxC section (independent invoices) ──
     if len(df_cxc) > 0:
-        st.markdown(f'<div class="section-title">Cuentas por Cobrar — Exportación</div>', unsafe_allow_html=True)
-        cxc_positivo = df_cxc[df_cxc['Deuda_USD'] > 0]
-        cxc_total = cxc_positivo['Deuda_USD'].sum()
-        avg_dias = cxc_positivo['Dias_Atraso_Prom'].mean() if len(cxc_positivo) > 0 else 0
+        st.markdown(f'<div class="section-title">Cuentas por Cobrar — Detalle Facturas</div>', unsafe_allow_html=True)
+        cxc_positivo = df_cxc[df_cxc['Deuda_Pendiente'] > 0]
+        cxc_total = cxc_positivo['Deuda_Pendiente'].sum()
+        avg_dias = cxc_positivo['Dias_Atrasados'].mean() if len(cxc_positivo) > 0 else 0
         st.markdown(f"""<div class="info-row">
-            <div class="info-card"><div class="info-label">TOTAL POR COBRAR (USD)</div><div class="info-value">{fmt_usd(cxc_total)}</div></div>
-            <div class="info-card"><div class="info-label">CLIENTES DEUDORES</div><div class="info-value">{len(cxc_positivo)}</div></div>
+            <div class="info-card"><div class="info-label">DEUDA TOTAL PENDIENTE (USD)</div><div class="info-value">{fmt_usd(cxc_total)}</div></div>
+            <div class="info-card"><div class="info-label">FACTURAS PENDIENTES</div><div class="info-value">{len(cxc_positivo)}</div></div>
             <div class="info-card"><div class="info-label">DÍAS ATRASO PROM.</div><div class="info-value" style="color:{C['red'] if avg_dias > 30 else C['yellow']}">{avg_dias:.0f} días</div></div>
         </div>""", unsafe_allow_html=True)
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
         st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">Detalle CxC — Exportación</b>', unsafe_allow_html=True)
         rows_cxc = ""
         for _, r in df_cxc.iterrows():
-            dias = r['Dias_Atraso_Prom']
+            dias = r['Dias_Atrasados']
             if pd.isna(dias):
                 dias = 0
             if dias > 45:
@@ -879,9 +878,8 @@ with tab8:
                 sem = f'<span style="color:{C["yellow"]}">⚡ Atención</span>'
             else:
                 sem = f'<span class="badge badge-green">✅ OK</span>'
-            d_color = C['cyan'] if r['Deuda_USD'] > 0 else C['green']
-            rows_cxc += f'<tr><td>{r["Cliente"][:40]}</td><td style="color:{d_color};font-weight:700;">{fmt_usd(r["Deuda_USD"])}</td><td style="font-weight:600;">{dias:.0f} días</td><td>{sem}</td></tr>'
-        st.markdown(f'<table class="styled"><tr><th>Cliente</th><th style="color:{C["cyan"]}">Deuda USD Homol.</th><th>Días Atraso Prom.</th><th>Estado</th></tr>{rows_cxc}</table>', unsafe_allow_html=True)
+            rows_cxc += f'<tr><td>{r["Cliente"][:40]}</td><td>{r["N_Doc"]}</td><td style="color:{C["cyan"]};font-weight:700;">{fmt_usd(r["Deuda_Pendiente"])}</td><td style="font-weight:600;">{dias:.0f} días</td><td>{sem}</td></tr>'
+        st.markdown(f'<table class="styled"><tr><th>Nombre de cliente</th><th>Nº documento</th><th style="color:{C["cyan"]}">Deuda pendiente</th><th>DÍAS ATRASADOS</th><th>Estado</th></tr>{rows_cxc}</table>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════ TAB 9: INVENTARIO ══════════════════════════
@@ -908,16 +906,17 @@ with tab9:
         for _, r in df_inv.iterrows():
             sap = str(r['CODIGO_SAP']).strip() if r['CODIGO_SAP'] else '—'
             mat = str(r['MATERIAL'])[:45]
-            ini = r['STOCK_INICIAL']
-            ing = r['INGRESOS']
-            sal = r['SALIDAS']
-            fin = r['STOCK_KG']
-            ini_str = f'{ini:,.0f}' if ini > 0 else '—'
-            ing_str = f'{ing:,.0f}' if ing > 0 else '—'
-            sal_str = f'{sal:,.0f}' if sal > 0 else '—'
-            fin_str = f'{fin:,.0f}'
+            # Convert all to TM
+            ini = (r['STOCK_INICIAL'] or 0) / 1000
+            ing = (r['INGRESOS'] or 0) / 1000
+            sal = (r['SALIDAS'] or 0) / 1000
+            fin = (r['STOCK_KG'] or 0) / 1000
+            ini_str = f'{ini:,.2f}' if ini > 0 else '—'
+            ing_str = f'{ing:,.2f}' if ing > 0 else '—'
+            sal_str = f'{sal:,.2f}' if sal > 0 else '—'
+            fin_str = f'{fin:,.2f}'
             rows_inv += f'<tr><td style="font-size:0.8rem;color:{C["muted"]}">{sap}</td><td>{mat}</td><td style="text-align:right;">{ini_str}</td><td style="text-align:right;color:{C["green"]};">{ing_str}</td><td style="text-align:right;color:{C["red"]};">{sal_str}</td><td style="text-align:right;color:{C["cyan"]};font-weight:700;">{fin_str}</td></tr>'
-        st.markdown(f'<table class="styled"><tr><th>Cód. SAP</th><th>Material</th><th>Stock Inicial</th><th style="color:{C["green"]}">Ingresos</th><th style="color:{C["red"]}">Salidas</th><th style="color:{C["cyan"]}">Stock Final (KG)</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
+        st.markdown(f'<table class="styled"><tr><th>Cód. SAP</th><th>Material</th><th>Stock Inicial (TM)</th><th style="color:{C["green"]}">Ingresos (TM)</th><th style="color:{C["red"]}">Salidas (TM)</th><th style="color:{C["cyan"]}">Stock Final (TM)</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("No se encontró el archivo de inventario en INPUT/")
