@@ -552,12 +552,21 @@ with tab5:
             <div class="metric-card mc4"><div class="mc-label">Posición PF</div><div class="mc-value">#{pf_pos}</div></div>
         </div>""", unsafe_allow_html=True)
 
-        # Bar chart by exporter
+        # Bar chart by exporter (Ensure PF is always visible)
         st.markdown('<div class="card-container" style="margin-top:20px;">', unsafe_allow_html=True)
         st.markdown(f'<b style="color:{C["white"]};">USD/TM por Exportador — {selected_prod}</b>', unsafe_allow_html=True)
-        exp_grp = prod_data.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False).head(15)
-        exp_grp['USD_TM'] = (exp_grp['U$ FOB Tot']/exp_grp['Kg Neto']*1000).fillna(0)
-        exp_grp = exp_grp.reset_index()
+        exp_grp_all = prod_data.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False)
+        exp_grp_all['USD_TM'] = (exp_grp_all['U$ FOB Tot']/exp_grp_all['Kg Neto']*1000).fillna(0)
+        
+        # Take Top 15, but MUST include PF if they have data for this product
+        top_15 = exp_grp_all.head(15).copy()
+        pf_rows = exp_grp_all[exp_grp_all.index.map(is_pf)]
+        if not pf_rows.empty:
+            pf_name = pf_rows.index[0]
+            if pf_name not in top_15.index:
+                top_15 = pd.concat([top_15, pf_rows])
+        
+        exp_grp = top_15.sort_values('U$ FOB Tot', ascending=False).reset_index()
         exp_grp['short_name'] = exp_grp['Exportador'].apply(lambda x: x[:25]+'...' if len(x)>25 else x)
         colors = [C['cyan'] if is_pf(e) else 'rgba(122,141,166,0.67)' for e in exp_grp['Exportador']]
         fig_exp = go.Figure(go.Bar(x=exp_grp['short_name'], y=exp_grp['USD_TM'], marker_color=colors))
