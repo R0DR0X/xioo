@@ -24,6 +24,18 @@ PRODUCT_COLORS = {
     "ALAS COCIDAS":"#06b6d4","FILETE COCIDO":"#f97316",
 }
 
+# ── UT0 Estáticos (Precio de Equilibrio) ─────────────────────
+UT0_FIXED = {
+    "ALAS CONGELADAS": 2046.96,
+    "ALAS COCIDAS": None,
+    "FILETE CONGELADO": 2048.63,
+    "FILETE PRECOCIDO": 2418.63,
+    "NUCA": 2168.63,
+    "REJOS CONGELADOS": 2038.63,
+    "TENTACULO": 2038.63,
+    "REPRODUCTOR": 2008.63
+}
+
 # ── CSS ──────────────────────────────────────────────────────
 st.markdown(f"""<style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -208,8 +220,8 @@ def load_cxc():
         if not nombre: continue
         rows.append({
             'Cliente': str(nombre).strip(),
-            'USD_HOMOL': float(usd_homol) if usd_homol else 0,
-            'Dias_Atrasados': float(dias_q) if (dias_q is not None and float(dias_q) > 0) else None,
+            'USD_HOMOL': abs(float(usd_homol)) if usd_homol else 0,
+            'Dias_Atrasados': float(dias_q) if (dias_q is not None) else 0,
         })
     wb.close()
     if not rows: return pd.DataFrame()
@@ -330,7 +342,7 @@ fob_cocido_pf = df_pf[df_pf['Partida Aduanera']==1605540000]['U$ FOB Tot'].sum()
 st.markdown(f"""<div class="kpi-row">
     <div class="kpi-card c1"><div class="kpi-label">FOB TOTAL</div><div class="kpi-value">{fmt_usd(fob_total_pf)}</div><div class="kpi-sub">{period_str}</div></div>
     <div class="kpi-card c2"><div class="kpi-label">PESO NETO</div><div class="kpi-value">{peso_neto_pf/1000:,.1f} TM</div><div class="kpi-sub">{peso_neto_pf:,.0f} kg</div></div>
-    <div class="kpi-card c3"><div class="kpi-label">FOB FRESCO</div><div class="kpi-value">{fmt_usd(fob_fresco_pf)}</div><div class="kpi-sub">{df_pf[df_pf['Partida Aduanera']==307430000]['Kg Neto'].sum()/1000:,.1f} TM</div></div>
+    <div class="kpi-card c3"><div class="kpi-label">TM VENDIDAS</div><div class="kpi-value">{df_rent['Cantidad'].sum():,.1f} TM</div><div class="kpi-sub">Total Resumen</div></div>
     <div class="kpi-card c4"><div class="kpi-label">FOB COCIDO</div><div class="kpi-value">{fmt_usd(fob_cocido_pf)}</div><div class="kpi-sub">{df_pf[df_pf['Partida Aduanera']==1605540000]['Kg Neto'].sum()/1000:,.1f} TM</div></div>
 </div>""", unsafe_allow_html=True)
 
@@ -389,15 +401,18 @@ with tab1:
     for prod in all_products:
         prod_df = df_classified[df_classified['PRODUCTO']==prod]
         pf_prod = prod_df[prod_df['Exportador'].apply(is_pf)]
-        mkt_no_pf = prod_df[~prod_df['Exportador'].apply(is_pf)]
         pf_utm = (pf_prod['U$ FOB Tot'].sum() / pf_prod['Kg Neto'].sum() * 1000) if pf_prod['Kg Neto'].sum()>0 else None
+        
+        # UT0 lookup
+        ut0 = UT0_FIXED.get(prod)
+        if prod == "REPRODUCTOR": ut0 = UT0_FIXED.get("REPRODUCTOR")
+        
         mkt_utm = (prod_df['U$ FOB Tot'].sum() / prod_df['Kg Neto'].sum() * 1000) if prod_df['Kg Neto'].sum()>0 else None
-        ut0 = (mkt_no_pf['U$ FOB Tot'].sum() / mkt_no_pf['Kg Neto'].sum() * 1000) if mkt_no_pf['Kg Neto'].sum()>0 else None
         vs_mkt = (pf_utm - mkt_utm) if pf_utm and mkt_utm else None
         vs_ut0 = (pf_utm - ut0) if pf_utm and ut0 else None
         vs_mkt_icon = f'<span style="color:{C["green"]}">↗ +{vs_mkt:.0f}</span>' if vs_mkt and vs_mkt>=0 else (f'<span style="color:{C["red"]}">↘ {vs_mkt:.0f}</span>' if vs_mkt else "—")
         vs_ut0_icon = f'<span style="color:{C["green"]}">↗ +{vs_ut0:.0f}</span>' if vs_ut0 and vs_ut0>=0 else (f'<span style="color:{C["red"]}">↘ {vs_ut0:.0f}</span>' if vs_ut0 else "—")
-        estado = '<span class="badge badge-green">Sobre UT0</span>' if vs_ut0 and vs_ut0>=0 else ('<span class="badge badge-red">Bajo UT0</span>' if vs_ut0 and vs_ut0<0 else '<span class="badge badge-gray">Sin venta</span>')
+        estado = '<span class="badge badge-green">Sobre UT0</span>' if vs_ut0 and vs_ut0>=0 else ('<span class="badge badge-red">Bajo UT0</span>' if vs_ut0 and vs_ut0<0 else '<span class="badge badge-gray">Sin referencia</span>')
         rows_html += f"<tr><td>{prod}</td><td style='color:{C['cyan']};font-weight:700;'>{fmt_usd(pf_utm) if pf_utm else '—'}</td><td>{fmt_usd(mkt_utm) if mkt_utm else '—'}</td><td style='color:{C['orange']};font-weight:700;'>{fmt_usd(ut0) if ut0 else '—'}</td><td>{vs_mkt_icon}</td><td>{vs_ut0_icon}</td><td>{estado}</td></tr>"
     st.markdown(f"""<table class="styled"><thead><tr><th>Producto</th><th style="color:{C['cyan']}">PERU FROST</th><th>$TM Mercado</th><th style="color:{C['orange']}">UT0</th><th>vs Mercado</th><th>vs UT0</th><th>Estado</th></tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -525,7 +540,7 @@ with tab5:
 
         pf_utm_val = (pf_prod['U$ FOB Tot'].sum()/pf_prod['Kg Neto'].sum()*1000) if pf_prod['Kg Neto'].sum()>0 else 0
         mkt_utm_val = (prod_data['U$ FOB Tot'].sum()/prod_data['Kg Neto'].sum()*1000) if prod_data['Kg Neto'].sum()>0 else 0
-        ut0_val = (mkt_no_pf['U$ FOB Tot'].sum()/mkt_no_pf['Kg Neto'].sum()*1000) if mkt_no_pf['Kg Neto'].sum()>0 else 0
+        ut0_val = UT0_FIXED.get(selected_prod) or 0
 
         # Rankings for this product
         prod_rank = prod_data.groupby('Exportador')['U$ FOB Tot'].sum().sort_values(ascending=False)
@@ -645,7 +660,7 @@ with tab6:
     monthly_f['mes_str'] = monthly_f['MES'].astype(str)
     monthly_c['mes_str'] = monthly_c['MES'].astype(str)
     fig_h = go.Figure()
-    fig_h.add_trace(go.Scatter(x=monthly_pf['mes_str'], y=monthly_pf['U$ FOB Tot'], name='Total', line=dict(color=C['white'], width=3), mode='lines+markers'))
+    fig_h.add_trace(go.Scatter(x=monthly_pf['mes_str'], y=monthly_pf['U$ FOB Tot'], name='Fresco + Cocido', line=dict(color=C['white'], width=3), mode='lines+markers'))
     fig_h.add_trace(go.Scatter(x=monthly_f['mes_str'], y=monthly_f['U$ FOB Tot'], name='Fresco', line=dict(color=C['green'], width=2), mode='lines+markers'))
     fig_h.add_trace(go.Scatter(x=monthly_c['mes_str'], y=monthly_c['U$ FOB Tot'], name='Cocido', line=dict(color=C['orange'], width=2), mode='lines+markers'))
     fig_h.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
@@ -769,10 +784,10 @@ with tab8:
         final_clients = []
         for _, td_row in df_td_cli.iterrows():
             td_name = str(td_row['Cliente_TD']).strip()
-            # Find matching Resumen row (exact match)
-            match = rent_cli[rent_cli['Cliente'].str.strip().str.upper() == td_name.upper()]
-            tm = match['TM_Vendidas'].sum() if len(match) > 0 else 0
-            cfr = match['Venta_CFR'].sum() if len(match) > 0 else 0
+            # Find matching Resumen row using column M (Cliente (Razón Social))
+            match = df_rent[df_rent['Cliente (Razón Social)'].str.strip().str.upper() == td_name.upper()]
+            tm = match['Cantidad'].sum() if len(match) > 0 else 0
+            cfr = match['VALOR CFR'].sum() if len(match) > 0 else 0
             mg_raw = td_row['MG_Neto']
             mg = mg_raw * 100 if abs(mg_raw) < 2 else mg_raw
             final_clients.append({
