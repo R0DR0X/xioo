@@ -110,10 +110,12 @@ st.markdown(f"""<style>
 # ── Data Loading ─────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
-    import glob
-    # Auto-detect any Veritrade file in the directory
-    v_files = glob.glob(os.path.join(input_dir, "Veritrade*.xlsx"))
+    base_dir = os.path.dirname(__file__)
+    dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
+    v_files = []
+    for d in dirs_to_check:
+        if os.path.exists(d):
+            v_files.extend([os.path.join(d, f) for f in os.listdir(d) if f.lower().startswith("veritrade") and f.lower().endswith(".xlsx")])
     if not v_files: return pd.DataFrame()
     path = max(v_files, key=os.path.getmtime)
         
@@ -130,10 +132,12 @@ df_raw = load_data()
 
 @st.cache_data
 def load_rentabilidad():
-    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
-    import glob
-    # Auto-detect Rentabilidad file
-    r_files = glob.glob(os.path.join(input_dir, "Rentabilidad*.xlsx"))
+    base_dir = os.path.dirname(__file__)
+    dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
+    r_files = []
+    for d in dirs_to_check:
+        if os.path.exists(d):
+            r_files.extend([os.path.join(d, f) for f in os.listdir(d) if f.lower().startswith("rentabilidad") and f.lower().endswith(".xlsx")])
     if not r_files: return pd.DataFrame()
     path = max(r_files, key=os.path.getmtime)
         
@@ -246,9 +250,12 @@ def load_inventario():
 @st.cache_data
 def load_cxc():
     """Load CxC independent rows from Sheet1: Cliente, Nº documento, Deuda (USD HOMOL), Días Atrasados"""
-    import glob
-    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
-    cxc_files = glob.glob(os.path.join(input_dir, "CxC*.xlsx"))
+    base_dir = os.path.dirname(__file__)
+    dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
+    cxc_files = []
+    for d in dirs_to_check:
+        if os.path.exists(d):
+            cxc_files.extend([os.path.join(d, f) for f in os.listdir(d) if f.lower().startswith("cxc") and f.lower().endswith(".xlsx")])
     if not cxc_files: return pd.DataFrame()
     path = max(cxc_files, key=os.path.getmtime)
     
@@ -310,9 +317,12 @@ def load_cxc():
 @st.cache_data
 def load_td_tables():
     """Load product and client profitability tables from TD sheet"""
-    import glob
-    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
-    r_files = glob.glob(os.path.join(input_dir, "Rentabilidad*.xlsx"))
+    base_dir = os.path.dirname(__file__)
+    dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
+    r_files = []
+    for d in dirs_to_check:
+        if os.path.exists(d):
+            r_files.extend([os.path.join(d, f) for f in os.listdir(d) if f.lower().startswith("rentabilidad") and f.lower().endswith(".xlsx")])
     if not r_files: return pd.DataFrame(), pd.DataFrame()
     path = max(r_files, key=os.path.getmtime)
     wb = openpyxl.load_workbook(path, data_only=True)
