@@ -26,13 +26,16 @@ PRODUCT_COLORS = {
 
 # ── UT0 Estáticos (Precio de Equilibrio) ─────────────────────
 UT0_FIXED = {
-    "ALAS": 2046.96,
+    # Nombres EXACTOS según el Excel Clasificado
+    "ALAS CONGELADAS": 2046.96,
+    "FILETE CONGELADO": 2048.63,
+    "NUCA": 2168.63,
+    "TENTACULO": 2038.63,  # Rejos
+    "REPRODUCTOR": 2008.63, # Rejos OR
+    
+    # Cocidos
     "ALAS COCIDAS": None,
-    "FILETE": 2048.63,
-    "FILETE PRECOCIDO": 2418.63,
-    "NUCAS": 2168.63,
-    "REJOS": 2038.63,
-    "REJOS OR": 2008.63
+    "FILETE COCIDO": 2418.63,
 }
 
 # ── CSS ──────────────────────────────────────────────────────
@@ -101,7 +104,7 @@ st.markdown(f"""<style>
 def load_data():
     path = os.path.join(os.path.dirname(__file__), "INPUT",
         "Veritrade_MARCOS@PERUFROST.COM_PE_E_20260327145809_CLASIFICADO.xlsx")
-    df = pd.read_excel(path, header=5)
+    df = pd.read_excel(path, sheet_name='Veritrade', header=5)
     df['Fecha'] = pd.to_datetime(df['Fecha'])
     df['FOB_KG'] = df['U$ FOB Tot'] / df['Kg Neto']
     df['USD_TM'] = df['FOB_KG'] * 1000
@@ -505,25 +508,39 @@ with tab3:
 with tab4:
     st.markdown('<div class="section-title">Rankings Top 15 Exportadores</div>', unsafe_allow_html=True)
 
-    def build_ranking_table(subset_df, title, partida_label):
+    # Definir listas exactas de productos para los rankings
+    list_congelado = ["ALAS CONGELADAS", "FILETE CONGELADO", "NUCA", "TENTACULO", "REPRODUCTOR"]
+    list_cocido = ["ALAS COCIDAS", "FILETE COCIDO"]
+    
+    df_rank_congelado = df_classified[df_classified['PRODUCTO'].isin(list_congelado)]
+    df_rank_cocido = df_classified[df_classified['PRODUCTO'].isin(list_cocido)]
+
+    def build_ranking_table(subset_df, title):
         st.markdown(f'<div class="card-container"><b style="color:{C["white"]};font-size:1.05rem;">{title}</b>', unsafe_allow_html=True)
-        grp = subset_df.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False).head(15)
-        grp['TM'] = grp['Kg Neto']/1000
-        grp['USD_TM'] = (grp['U$ FOB Tot']/grp['Kg Neto']*1000).fillna(0)
-        total_fob = grp['U$ FOB Tot'].sum()
-        grp['%FOB'] = grp['U$ FOB Tot']/total_fob*100
+        # Agrupar por exportador sumando FOB (Col O) y Volumen (Col J)
+        grp = subset_df.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False)
+        total_fob = grp['U$ FOB Tot'].sum() # Base total para el % FOB
+        grp = grp.head(15) # Tomar el top 15
+        
+        # Calcular TM y USD/TM (FOB/Volumen*1000)
+        grp['TM'] = grp['Kg Neto'] / 1000
+        grp['USD_TM'] = (grp['U$ FOB Tot'] / grp['Kg Neto'] * 1000).fillna(0)
+        
+        # Calcular % FOB = FOB del Exportador / FOB Total del grupo * 100
+        grp['%FOB'] = (grp['U$ FOB Tot'] / total_fob) * 100 if total_fob > 0 else 0
+        
         rows = ""
         for i, (exp, r) in enumerate(grp.iterrows()):
             is_pf_row = is_pf(exp)
             tr_class = ' class="pf"' if is_pf_row else ''
             name_display = exp[:40] + '...' if len(exp) > 40 else exp
             rank_display = f"{'🏆' if i==0 else '🥈' if i==1 else '🥉' if i==2 else f'#{i+1}'}"
-            rows += f'<tr{tr_class}><td>{rank_display}</td><td>{name_display}</td><td style="font-weight:700;">{fmt_usd(r["U$ FOB Tot"])}</td><td>{r["TM"]:,.1f} TM</td><td>${r["USD_TM"]:,.0f}</td><td style="color:{C["green"]};font-weight:600;">{r["%FOB"]:.1f}%</td></tr>'
+            rows += f'<tr{tr_class}><td>{rank_display}</td><td>{name_display}</td><td style="font-weight:700;">{fmt_usd(r["U$ FOB Tot"])}</td><td>{r["TM"]:,.1f} TM</td><td>${r["USD_TM"]:,.0f}</td><td style="color:{C["green"]};font-weight:600;">{r["%FOB"]:.2f}%</td></tr>'
         st.markdown(f'<table class="styled"><tr><th>#</th><th>Exportador</th><th>FOB</th><th>Volumen</th><th>USD/TM</th><th>% FOB</th></tr>{rows}</table>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    build_ranking_table(df_fresco, "🧊 Top 15 Exportadores — Fresco (Partida 307430000)", "FRESCO")
-    build_ranking_table(df_cocido, "🔥 Top 15 Exportadores — Cocido (Partida 1605540000)", "COCIDO")
+    build_ranking_table(df_rank_congelado, "🧊 Top 15 Exportadores — Productos Congelados (Alas, Filete, Nuca, Tentáculo, Reproductor)")
+    build_ranking_table(df_rank_cocido, "🔥 Top 15 Exportadores — Productos Cocidos (Alas Cocidas, Filete Cocido)")
 
 # ═══════════════ TAB 5: PRECIOS & UT0 ═══════════════════════
 with tab5:
@@ -585,10 +602,13 @@ with tab5:
     for p in all_prods:
         pd_p = df_classified[df_classified['PRODUCTO']==p]
         pf_p = pd_p[pd_p['Exportador'].apply(is_pf)]
-        np_p = pd_p[~pd_p['Exportador'].apply(is_pf)]
         pf_v = (pf_p['U$ FOB Tot'].sum()/pf_p['Kg Neto'].sum()*1000) if pf_p['Kg Neto'].sum()>0 else 0
         mk_v = (pd_p['U$ FOB Tot'].sum()/pd_p['Kg Neto'].sum()*1000) if pd_p['Kg Neto'].sum()>0 else 0
-        ut_v = (np_p['U$ FOB Tot'].sum()/np_p['Kg Neto'].sum()*1000) if np_p['Kg Neto'].sum()>0 else 0
+        
+        # Get specialized UT0
+        ut_v = UT0_FIXED.get(p)
+        if ut_v is None: ut_v = 0
+            
         comp_data.append({'Producto':p, 'PERU FROST':pf_v, '$TM Mercado':mk_v, 'UT0':ut_v})
     comp_df = pd.DataFrame(comp_data)
     fig_all = go.Figure()
@@ -1129,17 +1149,19 @@ with tab11:
     for prod in prods_consol:
         pf_p = pf_data[pf_data['PRODUCTO']==prod]
         all_p = all_data[all_data['PRODUCTO']==prod]
-        others_p = all_p[~all_p['Exportador'].apply(is_pf)]
         pf_utm = pf_p['U$ FOB Tot'].sum()/pf_p['Kg Neto'].sum()*1000 if pf_p['Kg Neto'].sum()>0 else 0
         mkt_utm = all_p['U$ FOB Tot'].sum()/all_p['Kg Neto'].sum()*1000 if all_p['Kg Neto'].sum()>0 else 0
-        ut0 = others_p['U$ FOB Tot'].sum()/others_p['Kg Neto'].sum()*1000 if others_p['Kg Neto'].sum()>0 else 0
+        
+        # UT0 ESTÁTICO (CORRECCIÓN)
+        ut0 = UT0_FIXED.get(prod)
         vs_mkt = pf_utm - mkt_utm
-        vs_ut0 = pf_utm - ut0
+        
         # Ranking
         rank_list = all_p.groupby('Exportador')['U$ FOB Tot'].sum().sort_values(ascending=False)
         pf_names = [e for e in rank_list.index if is_pf(e)]
         rank_pos = list(rank_list.index).index(pf_names[0])+1 if pf_names else 0
         rank_total = len(rank_list)
+        
         # Margin from rentabilidad
         mg_str = "—"
         if len(df_rent) > 0:
@@ -1149,16 +1171,56 @@ with tab11:
                 mg_pct = mg_val*100 if pd.notna(mg_val) and abs(mg_val)<1 else (mg_val if pd.notna(mg_val) else 0)
                 mg_color = C['green'] if mg_pct > 0 else C['red']
                 mg_str = f'<span style="color:{mg_color};font-weight:700;">{mg_pct:.1f}%</span>'
+                
         vs_mkt_badge = f'<span style="color:{C["green"]}">+{vs_mkt:,.0f}</span>' if vs_mkt >= 0 else f'<span style="color:{C["red"]}">{vs_mkt:,.0f}</span>'
-        vs_ut0_badge = f'<span style="color:{C["green"]}">+{vs_ut0:,.0f}</span>' if vs_ut0 >= 0 else f'<span style="color:{C["red"]}">{vs_ut0:,.0f}</span>'
+        
+        if ut0 is not None:
+            vs_ut0 = pf_utm - ut0
+            vs_ut0_badge = f'<span style="color:{C["green"]}">+{vs_ut0:,.0f}</span>' if vs_ut0 >= 0 else f'<span style="color:{C["red"]}">{vs_ut0:,.0f}</span>'
+            ut0_str = f'${ut0:,.0f}'
+        else:
+            vs_ut0_badge = "—"
+            ut0_str = "—"
+            
         rank_badge = f'<span style="color:{C["cyan"]};font-weight:700;">#{rank_pos}/{rank_total}</span>'
-        rows_consol += f'<tr><td style="font-weight:700;">{prod}</td><td style="color:{C["cyan"]};font-weight:700;">${pf_utm:,.0f}</td><td>${mkt_utm:,.0f}</td><td style="color:{C["orange"]};font-weight:700;">${ut0:,.0f}</td><td>{vs_mkt_badge}</td><td>{vs_ut0_badge}</td><td>{mg_str}</td><td>{rank_badge}</td></tr>'
+        rows_consol += f'<tr><td style="font-weight:700;">{prod}</td><td style="color:{C["cyan"]};font-weight:700;">${pf_utm:,.0f}</td><td>${mkt_utm:,.0f}</td><td style="color:{C["orange"]};font-weight:700;">{ut0_str}</td><td>{vs_mkt_badge}</td><td>{vs_ut0_badge}</td><td>{mg_str}</td><td>{rank_badge}</td></tr>'
     st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="color:{C["cyan"]}">PF USD/TM</th><th>$TM Mercado</th><th style="color:{C["orange"]}">UT0</th><th>vs Mercado</th><th>vs UT0</th><th>Margen %</th><th>Ranking</th></tr>{rows_consol}</table>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Download button
+    # ── Download buttons ──
+    st.markdown('<div class="section-title">Archivos Fuente del Dashboard</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="color:{C["muted"]};font-size:0.85rem;margin-bottom:16px;">Descarga la tabla procesada o los archivos Excel originales utilizados para auditar los datos.</div>', unsafe_allow_html=True)
+    
+    dl_c1, dl_c2, dl_c3, dl_c4, dl_c5 = st.columns(5)
+    
     csv = filtered_db.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Descargar CSV", csv, "peru_frost_base_datos.csv", "text/csv", key="download_csv")
+    dl_c1.download_button("📥 Descargar Tabla (CSV)", csv, "peru_frost_base_datos.csv", "text/csv", use_container_width=True)
+    
+    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
+    
+    # 1. Veritrade Excel
+    v_path = os.path.join(input_dir, "Veritrade_MARCOS@PERUFROST.COM_PE_E_20260327145809_CLASIFICADO.xlsx")
+    if os.path.exists(v_path):
+        with open(v_path, "rb") as f: v_bytes = f.read()
+        dl_c2.download_button("📊 Excel Veritrade", v_bytes, "Veritrade_Clasificado.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        
+    # 2. Rentabilidad
+    r_path = os.path.join(input_dir, "Rentabilidad por FP 2026.xlsx")
+    if os.path.exists(r_path):
+        with open(r_path, "rb") as f: r_bytes = f.read()
+        dl_c3.download_button("💰 Excel Rentabilidad", r_bytes, "Rentabilidad_2026.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        
+    # 3. Inventario
+    i_path = os.path.join(input_dir, "inventario PT al 23-03-2026 (2).xlsx")
+    if os.path.exists(i_path):
+        with open(i_path, "rb") as f: i_bytes = f.read()
+        dl_c4.download_button("📦 Excel Inventario", i_bytes, "Inventario_Kardex.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        
+    # 4. CxC
+    c_path = os.path.join(input_dir, "CxC al 25-3-2026.xlsx")
+    if os.path.exists(c_path):
+        with open(c_path, "rb") as f: c_bytes = f.read()
+        dl_c5.download_button("👥 Excel CxC", c_bytes, "Cartera_CxC.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 # ── Footer ───────────────────────────────────────────────────
 st.markdown(f"""<div style="text-align:center;margin-top:40px;padding:20px;border-top:1px solid {C['border']};">
