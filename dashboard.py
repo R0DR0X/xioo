@@ -138,34 +138,47 @@ def load_rentabilidad():
     for d in dirs_to_check:
         if os.path.exists(d):
             r_files.extend([os.path.join(d, f) for f in os.listdir(d) if f.lower().startswith("rentabilidad") and f.lower().endswith(".xlsx")])
-    if not r_files: return pd.DataFrame()
+    if not r_files: return pd.DataFrame(), f"No files found in {dirs_to_check}"
     path = max(r_files, key=os.path.getmtime)
         
-    wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb['Resumen']
-    headers = {}
-    for c in range(1, ws.max_column+1):
-        v = ws.cell(3, c).value
-        if v: headers[c] = re.sub(r'\s+', ' ', str(v)).strip()
-    rows = []
-    for r in range(4, ws.max_row+1):
-        row = {}
-        for c, h in headers.items():
-            row[h] = ws.cell(r, c).value
-        if row.get('Producto'): rows.append(row)
-    wb.close()
-    df = pd.DataFrame(rows)
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        sheet_name = [s for s in wb.sheetnames if 'resumen' in s.lower()]
+        if not sheet_name: return pd.DataFrame(), f"Sheet 'Resumen' missing. Found: {wb.sheetnames}"
+        ws = wb[sheet_name[0]]
+        headers = {}
+        for c in range(1, ws.max_column+1):
+            v = ws.cell(3, c).value
+            if v: headers[c] = re.sub(r'\s+', ' ', str(v)).strip()
+        rows = []
+        for r in range(4, ws.max_row+1):
+            row = {}
+            for c, h in headers.items():
+                row[h] = ws.cell(r, c).value
+            # Make it case insensitive for header dict
+            prod_val = next((v for k, v in row.items() if 'PRODUCTO' in str(k).upper()), None)
+            if prod_val: rows.append(row)
+        wb.close()
+        df = pd.DataFrame(rows)
+        # Fix columns mapped...
+        return df, f"Success OK: {len(df)} rows found. Headers: {list(headers.values())[:5]}"
+    except Exception as e:
+        return pd.DataFrame(), f"Error processing {path}: {str(e)}"
     for col in ['Cantidad','Precio TM','FOB / TM','VALOR FOB','VALOR CFR','Costo Flete',
                 'COSTO UNITARIO','Materia Prima','MOD','CIF','COSTO VENTAS',
                 'UTILIDAD BRUTA','MARGEN BRUTO','UTILIDAD OPERATIVA','MARGEN OPERATIVO',
                 'UTILIDAD NETA','MARGEN NETO','EBITDA','MARGEN EBITDA','DRAWBACK',
                 'GASTO VENTAS','GASTO ADM','GASTO FINANCIERO','DEPRECIACIÓN']:
+        # Rename standard columns if uppercase matches
+        for c in df.columns.tolist():
+            if str(c).upper().strip() == col.upper():
+                df.rename(columns={c: col}, inplace=True)
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
         
     if 'Fecha Embarque' in df.columns:
         df['Fecha Embarque'] = pd.to_datetime(df['Fecha Embarque'], errors='coerce')
 
-    return df
+    return df, "Filtered columns applied"
 
 @st.cache_data
 def load_inventario():
@@ -369,10 +382,20 @@ def load_td_tables():
     wb.close()
     return df_td_prod, df_td_cli
 
-df_rent = load_rentabilidad()
+df_raw = load_data()
+df_rent, dbg_rent = load_rentabilidad()
 inv_months, df_inv = load_inventario()
 df_cxc = load_cxc()
 df_td_prod, df_td_cli = load_td_tables()
+
+# Debug info on sidebar to diagnose Streamlit Cloud
+with st.sidebar:
+    with st.expander("🛠️ Debug System Info"):
+        st.write(f"Rentabilidad load: {dbg_rent}")
+        st.write(f"Len Rentabilidad: {len(df_rent)}")
+        st.write(f"Len Inventario: {len(df_inv)}")
+        st.write(f"Len TD_Prod: {len(df_td_prod)}")
+
 
 # Default FOB/KG ranges per product
 DEFAULT_RANGES = {
