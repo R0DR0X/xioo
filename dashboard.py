@@ -107,41 +107,15 @@ st.markdown(f"""<style>
     .part-sub {{ color: {C['muted']}; font-size: 0.78rem; }}
 </style>""", unsafe_allow_html=True)
 
-# ── Drive Configuration (IDs) ────────────────────────────────
-FILE_IDS = {
-    'veritrade': '128zfg2Mclnl8E3Dod4ywEEE4Uth04YFZ',
-    'rentabilidad': '18CR0xzJES16Ji7ap577yILMqr0BdWJPo',
-    'inventario': '1CNE_cnMHWdc-52YePW-7WVc5pt4FBO5u',
-    'cxc': '1xTz8_m1NYxbO5VLHKZ7FLGlRhPsnCN2J'
-}
-
-def download_from_drive(fkey, target_name):
-    """Download file from Google Drive using gdown if it's missing or to refresh."""
-    import gdown
-    fid = FILE_IDS.get(fkey)
-    if not fid: return None
-    path = os.path.join(os.path.dirname(__file__), "INPUT", target_name)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    url = f'https://drive.google.com/uc?id={fid}'
-    try:
-        # We download only if the file is smaller than expected or doesn't exist
-        # to avoid slow start-ups on every run. 
-        gdown.download(url, path, quiet=True, fuzzy=True)
-        return path
-    except Exception:
-        return path if os.path.exists(path) else None
-
 # ── Data Loading ─────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    path = download_from_drive('veritrade', "Veritrade_LATEST.xlsx")
-    if not path:
-        # Fallback to local search if drive fails
-        input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
-        import glob
-        v_files = glob.glob(os.path.join(input_dir, "Veritrade*.xlsx"))
-        if not v_files: return pd.DataFrame()
-        path = max(v_files, key=os.path.getmtime)
+    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
+    import glob
+    # Auto-detect any Veritrade file in the directory
+    v_files = glob.glob(os.path.join(input_dir, "Veritrade*.xlsx"))
+    if not v_files: return pd.DataFrame()
+    path = max(v_files, key=os.path.getmtime)
         
     df = pd.read_excel(path, sheet_name='Veritrade', header=5)
     df['Fecha'] = pd.to_datetime(df['Fecha'])
@@ -156,11 +130,12 @@ df_raw = load_data()
 
 @st.cache_data
 def load_rentabilidad():
-    path = download_from_drive('rentabilidad', "Rentabilidad_LATEST.xlsx")
-    if not path or not os.path.exists(path):
-        # Fallback local
-        path = os.path.join(os.path.dirname(__file__), "INPUT", "Rentabilidad por FP 2026.xlsx")
-        if not os.path.exists(path): return pd.DataFrame()
+    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
+    import glob
+    # Auto-detect Rentabilidad file
+    r_files = glob.glob(os.path.join(input_dir, "Rentabilidad*.xlsx"))
+    if not r_files: return pd.DataFrame()
+    path = max(r_files, key=os.path.getmtime)
         
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb['Resumen']
@@ -270,13 +245,11 @@ def load_inventario():
 @st.cache_data
 def load_cxc():
     """Load CxC independent rows from Sheet1: Cliente, Nº documento, Deuda (USD HOMOL), Días Atrasados"""
-    path = download_from_drive('cxc', "CxC_LATEST.xlsx")
-    if not path:
-        import glob
-        input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
-        cxc_files = glob.glob(os.path.join(input_dir, "CxC*.xlsx"))
-        if not cxc_files: return pd.DataFrame()
-        path = max(cxc_files, key=os.path.getmtime)
+    import glob
+    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
+    cxc_files = glob.glob(os.path.join(input_dir, "CxC*.xlsx"))
+    if not cxc_files: return pd.DataFrame()
+    path = max(cxc_files, key=os.path.getmtime)
     
     wb = openpyxl.load_workbook(path, data_only=True)
     # Use 'Data' sheet if it exists, otherwise fallback to the first active sheet
