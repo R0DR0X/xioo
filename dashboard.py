@@ -38,6 +38,9 @@ UT0_FIXED = {
     "FILETE COCIDO": 2418.63,
 }
 
+PROD_FRESCO = ["ALAS CONGELADAS", "FILETE CONGELADO", "NUCA", "REPRODUCTOR", "TENTACULO"]
+PROD_COCIDO = ["ALAS COCIDAS", "FILETE COCIDO"]
+
 # ── CSS ──────────────────────────────────────────────────────
 st.markdown(f"""<style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
@@ -139,6 +142,10 @@ def load_rentabilidad():
                 'UTILIDAD NETA','MARGEN NETO','EBITDA','MARGEN EBITDA','DRAWBACK',
                 'GASTO VENTAS','GASTO ADM','GASTO FINANCIERO','DEPRECIACIÓN']:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+    if 'Fecha Embarque' in df.columns:
+        df['Fecha Embarque'] = pd.to_datetime(df['Fecha Embarque'], errors='coerce')
+
     return df
 
 @st.cache_data
@@ -223,14 +230,27 @@ def load_cxc():
         
         nombre = ws.cell(r, 2).value      # B = Nombre de cliente
         n_doc = ws.cell(r, 4).value       # D = Nº documento
+        fecha_ideal = ws.cell(r, 12).value # L = Fecha Ideal Pago
         usd_homol = ws.cell(r, 16).value  # P = USD HOMOL
-        dias_q = ws.cell(r, 17).value     # Q = DÍAS ATRASADOS
+        dias_q = ws.cell(r, 17).value     # Q = DÍAS ATRASADOS (fallback)
+        
+        # Calculate dias dynamically if possible
+        dias = float(dias_q) if dias_q is not None else 0
+        try:
+            import datetime
+            if fecha_ideal and isinstance(fecha_ideal, datetime.datetime):
+                dias = (datetime.datetime.now() - fecha_ideal).days
+            elif fecha_ideal and isinstance(fecha_ideal, datetime.date):
+                dias = (datetime.date.today() - fecha_ideal).days
+        except Exception:
+            pass
+            
         if not nombre: continue
         rows.append({
             'Cliente': str(nombre).strip(),
             'N_Doc': str(n_doc).strip() if n_doc else '—',
             'Deuda_Pendiente': float(usd_homol),
-            'Dias_Atrasados': float(dias_q) if dias_q is not None else 0,
+            'Dias_Atrasados': max(0, dias),
         })
     wb.close()
     if not rows: return pd.DataFrame()
@@ -288,12 +308,15 @@ df_cxc = load_cxc()
 df_td_prod, df_td_cli = load_td_tables()
 
 def apply_fob_filter(df):
-    """Filter rows by valid FOB/KG ranges"""
-    mask_fresco_nuca = (df['Partida Aduanera']==307430000) & (df['PRODUCTO']=='NUCA') & (df['FOB_KG']>=0.5) & (df['FOB_KG']<=3.9)
-    mask_fresco_other = (df['Partida Aduanera']==307430000) & (df['PRODUCTO']!='NUCA') & (df['PRODUCTO'].notna()) & (df['PRODUCTO']!='') & (df['FOB_KG']>=1.0) & (df['FOB_KG']<=3.9)
-    mask_cocido = (df['Partida Aduanera']==1605540000) & (df['PRODUCTO'].notna()) & (df['PRODUCTO']!='') & (df['FOB_KG']>=1.3) & (df['FOB_KG']<=5.8)
+    """Filter rows by specific precise valid FOB/KG ranges per product"""
+    m_fil_con = (df['PRODUCTO']=='FILETE CONGELADO') & (df['FOB_KG']>=0.7) & (df['FOB_KG']<=2.4)
+    m_ala_con = (df['PRODUCTO']=='ALAS CONGELADAS') & (df['FOB_KG']>=0.7) & (df['FOB_KG']<=2.4)
+    m_nuc = (df['PRODUCTO']=='NUCA') & (df['FOB_KG']>=0.5) & (df['FOB_KG']<=2.0)
+    m_tent_rep = (df['PRODUCTO'].isin(['TENTACULO','REPRODUCTOR'])) & (df['FOB_KG']>=1.0) & (df['FOB_KG']<=3.3)
+    m_ala_coc = (df['PRODUCTO']=='ALAS COCIDAS') & (df['FOB_KG']>=1.0) & (df['FOB_KG']<=5.0)
+    m_fil_coc = (df['PRODUCTO']=='FILETE COCIDO') & (df['FOB_KG']>=1.0) & (df['FOB_KG']<=5.0)
     mask_no_product = (df['PRODUCTO'].isna()) | (df['PRODUCTO']=='')
-    return df[mask_fresco_nuca | mask_fresco_other | mask_cocido | mask_no_product]
+    return df[m_fil_con | m_ala_con | m_nuc | m_tent_rep | m_ala_coc | m_fil_coc | mask_no_product]
 
 def is_pf(name):
     return 'PERU FROST' in str(name).upper()
@@ -307,6 +330,13 @@ with st.sidebar:
     st.markdown(f"<div style='color:{C['cyan']};font-weight:800;font-size:1.1rem;margin-bottom:16px;'>⚙️ FILTROS</div>", unsafe_allow_html=True)
     min_date = df_raw['Fecha'].min().date()
     max_date = df_raw['Fecha'].max().date()
+    
+    # Ensure rentabilidad dates are accessible if they go beyond veritrade entries
+    if len(df_rent) > 0 and 'Fecha Embarque' in df_rent.columns:
+        rent_max = df_rent['Fecha Embarque'].max()
+        if pd.notna(rent_max):
+            max_date = max(max_date, rent_max.date())
+
     date_range = st.date_input("📅 Rango de Fechas", value=(min_date, max_date), min_value=min_date, max_value=max_date, key="date_filter")
     if isinstance(date_range, tuple) and len(date_range)==2:
         d_start, d_end = date_range
@@ -314,7 +344,6 @@ with st.sidebar:
         d_start, d_end = min_date, max_date
     st.markdown(f"<div style='color:{C['muted']};font-size:0.75rem;margin-top:8px;'>Registros totales: <b style=\"color:{C['white']}\">{len(df_raw):,}</b></div>", unsafe_allow_html=True)
     st.markdown("---")
-    st.markdown(f"<div style='color:{C['muted']};font-size:0.7rem;'>🔒 Filtros FOB/KG activos<br>Fresco: [1.0 – 3.9] (Nuca: 0.5)<br>Cocido: [1.3 – 5.8]</div>", unsafe_allow_html=True)
 
 # Apply date filter
 df_dated = df_raw[(df_raw['Fecha'].dt.date >= d_start) & (df_raw['Fecha'].dt.date <= d_end)]
@@ -322,8 +351,9 @@ df = apply_fob_filter(df_dated)
 
 # Subsets
 df_pf = df[df['Exportador'].apply(is_pf)]
-df_fresco = df[df['Partida Aduanera']==307430000]
-df_cocido = df[df['Partida Aduanera']==1605540000]
+df_fresco = df[df['PRODUCTO'].isin(PROD_FRESCO)]
+df_cocido = df[df['PRODUCTO'].isin(PROD_COCIDO)]
+df_classified = df[df['PRODUCTO'].notna() & (df['PRODUCTO']!='')]
 df_classified = df[df['PRODUCTO'].notna() & (df['PRODUCTO']!='')]
 
 # ── Header Banner ────────────────────────────────────────────
@@ -336,16 +366,17 @@ st.markdown(f"""<div class="header-banner">
 </div>""", unsafe_allow_html=True)
 
 # ── KPI Row ──────────────────────────────────────────────────
-fob_total_pf = df_pf['U$ FOB Tot'].sum()
-peso_neto_pf = df_pf['Kg Neto'].sum()
-fob_fresco_pf = df_pf[df_pf['Partida Aduanera']==307430000]['U$ FOB Tot'].sum()
-fob_cocido_pf = df_pf[df_pf['Partida Aduanera']==1605540000]['U$ FOB Tot'].sum()
+df_pf_clean = df_pf[df_pf['PRODUCTO'].isin(PROD_FRESCO + PROD_COCIDO)]
+fob_total_pf = df_pf_clean['U$ FOB Tot'].sum()
+peso_neto_pf = df_pf_clean['Kg Neto'].sum()
+fob_fresco_pf = df_pf_clean[df_pf_clean['PRODUCTO'].isin(PROD_FRESCO)]['U$ FOB Tot'].sum()
+fob_cocido_pf = df_pf_clean[df_pf_clean['PRODUCTO'].isin(PROD_COCIDO)]['U$ FOB Tot'].sum()
 
 st.markdown(f"""<div class="kpi-row">
     <div class="kpi-card c1"><div class="kpi-label">FOB TOTAL</div><div class="kpi-value">{fmt_usd(fob_total_pf)}</div><div class="kpi-sub">{period_str}</div></div>
     <div class="kpi-card c2"><div class="kpi-label">PESO NETO</div><div class="kpi-value">{peso_neto_pf/1000:,.1f} TM</div><div class="kpi-sub">{peso_neto_pf:,.0f} kg</div></div>
-    <div class="kpi-card c3"><div class="kpi-label">TM VENDIDAS</div><div class="kpi-value">{df_rent['Cantidad'].sum():,.1f} TM</div><div class="kpi-sub">Total Resumen</div></div>
-    <div class="kpi-card c4"><div class="kpi-label">FOB COCIDO</div><div class="kpi-value">{fmt_usd(fob_cocido_pf)}</div><div class="kpi-sub">{df_pf[df_pf['Partida Aduanera']==1605540000]['Kg Neto'].sum()/1000:,.1f} TM</div></div>
+    <div class="kpi-card c3"><div class="kpi-label">FOB FRESCO</div><div class="kpi-value">{fmt_usd(fob_fresco_pf)}</div><div class="kpi-sub">Total Fresco PF</div></div>
+    <div class="kpi-card c4"><div class="kpi-label">FOB COCIDO</div><div class="kpi-value">{fmt_usd(fob_cocido_pf)}</div><div class="kpi-sub">Total Cocido PF</div></div>
 </div>""", unsafe_allow_html=True)
 
 # ── TABS ─────────────────────────────────────────────────────
@@ -360,11 +391,11 @@ with tab1:
     pf_rank_f = next((i+1 for i,e in enumerate(rank_fresco.index) if is_pf(e)), "—")
     pf_rank_c = next((i+1 for i,e in enumerate(rank_cocido.index) if is_pf(e)), "—")
     # Top market
-    pf_markets = df_pf.groupby('Pais de Destino')['U$ FOB Tot'].sum().sort_values(ascending=False)
+    pf_markets = df_pf_clean.groupby('Pais de Destino')['U$ FOB Tot'].sum().sort_values(ascending=False)
     top_market = pf_markets.index[0] if len(pf_markets)>0 else "—"
     top_market_pct = (pf_markets.iloc[0]/fob_total_pf*100) if len(pf_markets)>0 and fob_total_pf>0 else 0
     # Active products
-    prods_activos = df_pf[df_pf['PRODUCTO'].notna() & (df_pf['PRODUCTO']!='')]['PRODUCTO'].nunique()
+    prods_activos = df_pf_clean['PRODUCTO'].nunique()
     total_prods = df_classified['PRODUCTO'].nunique()
 
     st.markdown(f"""<div class="info-row">
@@ -376,7 +407,7 @@ with tab1:
 
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown('<div class="card-container"><b style="color:white;">FOB por Mercado de Destino</b>', unsafe_allow_html=True)
+        st.markdown('<div class="card-container"><b style="color:white;">FOB por Mercado de Destino PF</b>', unsafe_allow_html=True)
         if len(pf_markets) > 0:
             top5m = pf_markets.head(5).reset_index()
             top5m.columns = ['Pais','FOB']
@@ -386,7 +417,7 @@ with tab1:
             st.plotly_chart(fig_m, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
     with col_b:
-        st.markdown('<div class="card-container"><b style="color:white;">Mix: Fresco vs Cocido (FOB)</b>', unsafe_allow_html=True)
+        st.markdown('<div class="card-container"><b style="color:white;">Mix: Fresco vs Cocido (FOB) PF</b>', unsafe_allow_html=True)
         if fob_fresco_pf > 0 or fob_cocido_pf > 0:
             fig_pie = go.Figure(go.Pie(labels=['Fresco','Cocido'], values=[fob_fresco_pf, fob_cocido_pf],
                 marker_colors=[C['green'], C['orange']], hole=0.55, textinfo='label+percent', textfont_size=13))
@@ -450,14 +481,14 @@ with tab2:
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown(f'<div class="section-title">Participación de Mercado — PERU FROST vs Industria</div>', unsafe_allow_html=True)
-    total_fresco_fob = df_fresco['U$ FOB Tot'].sum()
-    total_cocido_fob = df_cocido['U$ FOB Tot'].sum()
-    total_fresco_tm = df_fresco['Kg Neto'].sum()/1000
-    total_cocido_tm = df_cocido['Kg Neto'].sum()/1000
-    pf_f_fob = df_pf[df_pf['Partida Aduanera']==307430000]['U$ FOB Tot'].sum()
-    pf_c_fob = df_pf[df_pf['Partida Aduanera']==1605540000]['U$ FOB Tot'].sum()
-    pf_f_tm = df_pf[df_pf['Partida Aduanera']==307430000]['Kg Neto'].sum()/1000
-    pf_c_tm = df_pf[df_pf['Partida Aduanera']==1605540000]['Kg Neto'].sum()/1000
+    total_fresco_fob = df[df['PRODUCTO'].isin(PROD_FRESCO)]['U$ FOB Tot'].sum()
+    total_cocido_fob = df[df['PRODUCTO'].isin(PROD_COCIDO)]['U$ FOB Tot'].sum()
+    total_fresco_tm = df[df['PRODUCTO'].isin(PROD_FRESCO)]['Kg Neto'].sum()/1000
+    total_cocido_tm = df[df['PRODUCTO'].isin(PROD_COCIDO)]['Kg Neto'].sum()/1000
+    pf_f_fob = df_pf[df_pf['PRODUCTO'].isin(PROD_FRESCO)]['U$ FOB Tot'].sum()
+    pf_c_fob = df_pf[df_pf['PRODUCTO'].isin(PROD_COCIDO)]['U$ FOB Tot'].sum()
+    pf_f_tm = df_pf[df_pf['PRODUCTO'].isin(PROD_FRESCO)]['Kg Neto'].sum()/1000
+    pf_c_tm = df_pf[df_pf['PRODUCTO'].isin(PROD_COCIDO)]['Kg Neto'].sum()/1000
     parts = [
         ("Fresco FOB", pf_f_fob/total_fresco_fob*100 if total_fresco_fob else 0, fmt_usd(pf_f_fob), C['cyan']),
         ("Cocido FOB", pf_c_fob/total_cocido_fob*100 if total_cocido_fob else 0, fmt_usd(pf_c_fob), C['green']),
@@ -623,95 +654,88 @@ with tab5:
 
 # ═══════════════ TAB 6: HISTÓRICO 12M ═══════════════════════
 with tab6:
-    st.markdown('<div class="section-title">Histórico Últimos 12 Meses</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Histórico Últimos 12 Meses por Producto</div>', unsafe_allow_html=True)
     st.markdown(f'<div style="color:{C["muted"]};font-size:0.85rem;margin-bottom:16px;">📌 Esta vista siempre muestra los últimos 12 meses del dataset, sin afectar el filtro de fechas.</div>', unsafe_allow_html=True)
 
-    # Use raw data, apply FOB filter, get last 12 months
-    df_hist = apply_fob_filter(df_raw)
+    # Use raw data WITHOUT current fob filters to keep historical peaks intact
+    df_hist = df_raw.copy()
     max_month = df_hist['Fecha'].max().to_period('M')
     min_month_12 = max_month - 11
     df_hist = df_hist[df_hist['MES'] >= min_month_12]
-    df_hist_pf = df_hist[df_hist['Exportador'].apply(is_pf)]
-
-    # Monthly aggregations
-    monthly_pf = df_hist_pf.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
-    monthly_pf['TM'] = monthly_pf['Kg Neto']/1000
-    monthly_pf['USD_TM'] = (monthly_pf['U$ FOB Tot']/monthly_pf['Kg Neto']*1000).fillna(0)
-    monthly_pf['mes_str'] = monthly_pf['MES'].astype(str)
-
-    # 5 KPI cards
-    precio_prom = monthly_pf['USD_TM'].mean() if len(monthly_pf) > 0 else 0
-    precio_max = monthly_pf['USD_TM'].max() if len(monthly_pf) > 0 else 0
-    precio_min = monthly_pf['USD_TM'].min() if len(monthly_pf) > 0 else 0
-    vol_total = monthly_pf['TM'].sum()
-    meses_activos = len(monthly_pf[monthly_pf['U$ FOB Tot'] > 0])
-
-    st.markdown(f"""<div class="kpi-row">
-        <div class="kpi-card c1"><div class="kpi-label">PRECIO PROMEDIO</div><div class="kpi-value">${precio_prom:,.0f}</div><div class="kpi-sub">USD/TM</div></div>
-        <div class="kpi-card c2"><div class="kpi-label">PRECIO MÁXIMO</div><div class="kpi-value">${precio_max:,.0f}</div><div class="kpi-sub">USD/TM</div></div>
-        <div class="kpi-card c3"><div class="kpi-label">PRECIO MÍNIMO</div><div class="kpi-value">${precio_min:,.0f}</div><div class="kpi-sub">USD/TM</div></div>
-        <div class="kpi-card c4"><div class="kpi-label">VOLUMEN TOTAL</div><div class="kpi-value">{vol_total:,.1f} TM</div><div class="kpi-sub">{meses_activos}/12 meses activos</div></div>
-    </div>""", unsafe_allow_html=True)
-
-    # Two side-by-side charts: Price line + Volume bars
-    col_h1, col_h2 = st.columns(2)
-    with col_h1:
-        st.markdown('<div class="card-container">', unsafe_allow_html=True)
-        st.markdown(f'<b style="color:{C["white"]};">Evolución Precio USD/TM — PERU FROST</b>', unsafe_allow_html=True)
-        # Calculate UT0 line for history
-        monthly_all = df_hist[~df_hist['Exportador'].apply(is_pf)].groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
-        monthly_all['UT0'] = (monthly_all['U$ FOB Tot']/monthly_all['Kg Neto']*1000).fillna(0)
-        monthly_all['mes_str'] = monthly_all['MES'].astype(str)
-        fig_price = go.Figure()
-        fig_price.add_trace(go.Scatter(x=monthly_pf['mes_str'], y=monthly_pf['USD_TM'], name='PERU FROST', line=dict(color=C['cyan'], width=3), mode='lines+markers', marker=dict(size=8)))
-        fig_price.add_trace(go.Scatter(x=monthly_all['mes_str'], y=monthly_all['UT0'], name='UT0 Mercado', line=dict(color=C['red'], width=2, dash='dash'), mode='lines'))
-        fig_price.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
-            legend=dict(orientation='h', y=-0.15), margin=dict(l=0,r=0,t=10,b=40), height=350,
-            yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), xaxis=dict(gridcolor='rgba(30,58,95,0.13)'))
-        st.plotly_chart(fig_price, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    with col_h2:
-        st.markdown('<div class="card-container">', unsafe_allow_html=True)
-        st.markdown(f'<b style="color:{C["white"]};">Volumen Mensual (TM) — PERU FROST</b>', unsafe_allow_html=True)
-        fig_vol = go.Figure(go.Bar(x=monthly_pf['mes_str'], y=monthly_pf['TM'], marker_color=C['cyan'], marker=dict(opacity=0.8)))
-        fig_vol.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
-            margin=dict(l=0,r=0,t=10,b=40), height=350,
-            yaxis=dict(gridcolor='rgba(30,58,95,0.27)', ticksuffix=' TM'), xaxis=dict(gridcolor='rgba(30,58,95,0.13)'))
-        st.plotly_chart(fig_vol, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    # FOB evolution line chart (Total/Fresco/Cocido)
-    st.markdown('<div class="card-container">', unsafe_allow_html=True)
-    st.markdown(f'<b style="color:{C["white"]};">Evolución FOB Mensual — PERU FROST</b>', unsafe_allow_html=True)
-    monthly_f = df_hist_pf[df_hist_pf['Partida Aduanera']==307430000].groupby('MES')['U$ FOB Tot'].sum().reset_index()
-    monthly_c = df_hist_pf[df_hist_pf['Partida Aduanera']==1605540000].groupby('MES')['U$ FOB Tot'].sum().reset_index()
-    monthly_f['mes_str'] = monthly_f['MES'].astype(str)
-    monthly_c['mes_str'] = monthly_c['MES'].astype(str)
-    fig_h = go.Figure()
-    # fig_h.add_trace(go.Scatter(x=monthly_pf['mes_str'], y=monthly_pf['U$ FOB Tot'], name='Fresco + Cocido', line=dict(color=C['white'], width=3), mode='lines+markers'))
-    fig_h.add_trace(go.Scatter(x=monthly_f['mes_str'], y=monthly_f['U$ FOB Tot'], name='Fresco', line=dict(color=C['green'], width=2), mode='lines+markers'))
-    fig_h.add_trace(go.Scatter(x=monthly_c['mes_str'], y=monthly_c['U$ FOB Tot'], name='Cocido', line=dict(color=C['orange'], width=2), mode='lines+markers'))
-    fig_h.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
-        legend=dict(orientation='h', y=-0.15), margin=dict(l=0,r=0,t=10,b=40), height=350,
-        yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), xaxis=dict(gridcolor='rgba(30,58,95,0.13)'))
-    st.plotly_chart(fig_h, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # Monthly summary table
-    st.markdown('<div class="card-container">', unsafe_allow_html=True)
-    st.markdown(f'<b style="color:{C["white"]};">Resumen Mensual</b>', unsafe_allow_html=True)
-    rows_m = ""
-    for _, r in monthly_pf.iterrows():
-        rows_m += f'<tr><td style="font-weight:600;">{r["MES"]}</td><td style="color:{C["cyan"]};font-weight:700;">{fmt_usd(r["U$ FOB Tot"])}</td><td>{r["TM"]:,.1f} TM</td><td style="font-weight:600;">${r["USD_TM"]:,.0f}</td></tr>'
-    st.markdown(f'<table class="styled"><tr><th>Mes</th><th>FOB</th><th>Volumen</th><th>USD/TM</th></tr>{rows_m}</table>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Filter only classified products
+    df_hist_cl = df_hist[df_hist['PRODUCTO'].notna() & (df_hist['PRODUCTO']!='')]
+    all_prods_hist = sorted(df_hist_cl['PRODUCTO'].unique())
+    selected_prod_t6 = st.selectbox("Seleccionar Producto para Histórico", all_prods_hist, key="hist_prod")
+    
+    if selected_prod_t6:
+        # Filter by product
+        df_hist_prod = df_hist_cl[df_hist_cl['PRODUCTO'] == selected_prod_t6]
+        df_hist_pf = df_hist_prod[df_hist_prod['Exportador'].apply(is_pf)]
+        df_hist_mkt = df_hist_prod[~df_hist_prod['Exportador'].apply(is_pf)]
+    
+        # Monthly aggregations PF
+        monthly_pf = df_hist_pf.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
+        monthly_pf['TM'] = monthly_pf['Kg Neto']/1000
+        monthly_pf['USD_TM'] = (monthly_pf['U$ FOB Tot']/monthly_pf['Kg Neto']*1000).fillna(0)
+        monthly_pf['mes_str'] = monthly_pf['MES'].astype(str)
+        
+        # Monthly aggregations Market
+        monthly_mkt = df_hist_mkt.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
+        monthly_mkt['USD_TM'] = (monthly_mkt['U$ FOB Tot']/monthly_mkt['Kg Neto']*1000).fillna(0)
+        monthly_mkt['mes_str'] = monthly_mkt['MES'].astype(str)
+    
+        # 4 KPI cards (PF) based on product
+        precio_prom = monthly_pf['USD_TM'].mean() if len(monthly_pf) > 0 else 0
+        precio_max = monthly_pf['USD_TM'].max() if len(monthly_pf) > 0 else 0
+        precio_min = monthly_pf['USD_TM'].min() if len(monthly_pf) > 0 else 0
+        vol_total = monthly_pf['TM'].sum()
+        meses_activos = len(monthly_pf[monthly_pf['U$ FOB Tot'] > 0])
+    
+        st.markdown(f"""<div class="kpi-row">
+            <div class="kpi-card c1"><div class="kpi-label">PRECIO PROMEDIO</div><div class="kpi-value">${precio_prom:,.0f}</div><div class="kpi-sub">USD/TM</div></div>
+            <div class="kpi-card c2"><div class="kpi-label">PRECIO MÁXIMO</div><div class="kpi-value">${precio_max:,.0f}</div><div class="kpi-sub">USD/TM</div></div>
+            <div class="kpi-card c3"><div class="kpi-label">PRECIO MÍNIMO</div><div class="kpi-value">${precio_min:,.0f}</div><div class="kpi-sub">USD/TM</div></div>
+            <div class="kpi-card c4"><div class="kpi-label">VOLUMEN TOTAL</div><div class="kpi-value">{vol_total:,.1f} TM</div><div class="kpi-sub">{meses_activos}/12 meses activos</div></div>
+        </div>""", unsafe_allow_html=True)
+    
+        # Two side-by-side charts: Price line + Volume bars
+        col_h1, col_h2 = st.columns(2)
+        with col_h1:
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<b style="color:{C["white"]};">Evolución Precio USD/TM — PERU FROST vs Industria Mercado</b>', unsafe_allow_html=True)
+            
+            fig_price = go.Figure()
+            if len(monthly_pf) > 0:
+                fig_price.add_trace(go.Scatter(x=monthly_pf['mes_str'], y=monthly_pf['USD_TM'], name='PERU FROST', line=dict(color=C['cyan'], width=3), mode='lines+markers', marker=dict(size=8)))
+            if len(monthly_mkt) > 0:
+                fig_price.add_trace(go.Scatter(x=monthly_mkt['mes_str'], y=monthly_mkt['USD_TM'], name='Promedio Industria', line=dict(color='rgba(122,141,166,0.8)', width=2, dash='dash'), mode='lines+markers', marker=dict(size=4)))
+                
+            fig_price.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
+                legend=dict(orientation='h', y=-0.15), margin=dict(l=0,r=0,t=10,b=40), height=350,
+                yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), xaxis=dict(gridcolor='rgba(30,58,95,0.13)'))
+            st.plotly_chart(fig_price, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with col_h2:
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<b style="color:{C["white"]};">Volumen Mensual (TM) — PERU FROST</b>', unsafe_allow_html=True)
+            if len(monthly_pf) > 0:
+                fig_vol = go.Figure(go.Bar(x=monthly_pf['mes_str'], y=monthly_pf['TM'], marker_color=C['cyan'], marker=dict(opacity=0.8)))
+                fig_vol.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
+                    margin=dict(l=0,r=0,t=10,b=40), height=350,
+                    yaxis=dict(gridcolor='rgba(30,58,95,0.27)', ticksuffix=' TM'), xaxis=dict(gridcolor='rgba(30,58,95,0.13)'))
+                st.plotly_chart(fig_vol, use_container_width=True)
+            else:
+                st.caption("No hay volumen en los últimos 12 meses.")
+            st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════ TAB 7: TOP 5 COMPETIDORES ══════════════════
 with tab7:
     st.markdown('<div class="section-title">Top 5 Competidores — Análisis de Precios</div>', unsafe_allow_html=True)
 
-    # Use historical data (same as tab6)
-    df_comp = apply_fob_filter(df_raw)
+    # Use raw un-filtered historical data to keep historical peaks intact for 12 month charts
+    df_comp = df_raw.copy()
     max_m = df_comp['Fecha'].max().to_period('M')
     min_m = max_m - 11
     df_comp = df_comp[df_comp['MES'] >= min_m]
@@ -756,23 +780,26 @@ with tab7:
     st.plotly_chart(fig_t5, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Current month price comparison bar chart
-    last_month = df_prod['MES'].max()
-    df_last = df_prod[df_prod['MES']==last_month]
-    last_by_exp = df_last.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
+    # Current filter price comparison bar chart
+    df_prod_filter = df[df['PRODUCTO']==selected_prod_t5]
+    last_by_exp = df_prod_filter.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
     last_by_exp['USD_TM'] = (last_by_exp['U$ FOB Tot']/last_by_exp['Kg Neto']*1000).fillna(0)
+    
+    # Only keep Top 5 + PF for this chart
+    last_by_exp = last_by_exp[last_by_exp['Exportador'].isin(top5_exp) | last_by_exp['Exportador'].apply(is_pf)]
     last_by_exp = last_by_exp.sort_values('USD_TM', ascending=True)
+
     # Color: PF = cyan, others = gradient
     colors_bar = []
     for _, r in last_by_exp.iterrows():
         colors_bar.append(C['cyan'] if is_pf(r['Exportador']) else 'rgba(122,141,166,0.53)')
 
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
-    st.markdown(f'<b style="color:{C["white"]};">{selected_prod_t5} — Precio {last_month} (USD/TM)</b>', unsafe_allow_html=True)
+    st.markdown(f'<b style="color:{C["white"]};">{selected_prod_t5} — Precio {period_str} (USD/TM)</b>', unsafe_allow_html=True)
     fig_bar = go.Figure(go.Bar(
         y=last_by_exp['Exportador'].apply(lambda x: str(x)[:30]),
         x=last_by_exp['USD_TM'], orientation='h', marker_color=colors_bar,
-        text=last_by_exp['USD_TM'].apply(lambda v: f'${v:,.0f}'), textposition='outside'))
+        text=last_by_exp['USD_TM'].apply(lambda v: f'${v:,.0f}' if v>0 else ''), textposition='outside'))
     fig_bar.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
         margin=dict(l=0,r=60,t=10,b=0), height=max(250, len(last_by_exp)*35),
         xaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'))
@@ -782,17 +809,37 @@ with tab7:
     # Summary table
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
     st.markdown(f'<b style="color:{C["white"]};">Comparativo Top 5 vs PERU FROST — {selected_prod_t5}</b>', unsafe_allow_html=True)
-    pf_price = pf_monthly['USD_TM'].mean() if len(pf_monthly) > 0 else 0
-    rows_t5 = ""
-    for i, exp in enumerate(top5_exp):
-        exp_d = df_prod_comp[df_prod_comp['Exportador']==exp]
-        exp_fob = exp_d['U$ FOB Tot'].sum()
-        exp_tm = exp_d['Kg Neto'].sum()/1000
-        exp_utm = exp_d['U$ FOB Tot'].sum()/exp_d['Kg Neto'].sum()*1000 if exp_d['Kg Neto'].sum()>0 else 0
-        diff = pf_price - exp_utm
-        diff_badge = f'<span style="color:{C["green"]}">↗ +${diff:,.0f}</span>' if diff > 0 else f'<span style="color:{C["red"]}">↘ ${diff:,.0f}</span>'
-        rows_t5 += f'<tr><td>#{i+1}</td><td>{str(exp)[:35]}</td><td style="color:{C["cyan"]};font-weight:700;">{fmt_usd(exp_fob)}</td><td>{exp_tm:,.1f} TM</td><td style="font-weight:700;">${exp_utm:,.0f}</td><td>{diff_badge}</td></tr>'
-    st.markdown(f'<table class="styled"><tr><th>#</th><th>Competidor</th><th>FOB</th><th>TM</th><th>USD/TM</th><th>vs PF</th></tr>{rows_t5}</table>', unsafe_allow_html=True)
+    
+    # PF Metrics
+    pf_df_filter = df_prod_filter[df_prod_filter['Exportador'].apply(is_pf)]
+    pf_usd_filter = (pf_df_filter['U$ FOB Tot'].sum() / pf_df_filter['Kg Neto'].sum() * 1000) if pf_df_filter['Kg Neto'].sum()>0 else 0
+    pf_usd_12m = (pf_monthly['U$ FOB Tot'].sum() / pf_monthly['Kg Neto'].sum() * 1000) if pf_monthly['Kg Neto'].sum()>0 else 0
+    pf_active = len(pf_monthly[pf_monthly['U$ FOB Tot']>0])
+    
+    rows_t5 = f'<tr style="background:rgba(0,255,204,0.1);"><td style="color:{C["cyan"]};font-weight:800;">PERU FROST</td><td style="color:{C["cyan"]};font-weight:800;">${pf_usd_filter:,.0f}</td><td style="color:{C["muted"]}">${pf_usd_12m:,.0f}</td><td style="color:{C["muted"]}">{pf_active}/12</td><td>—</td></tr>'
+    
+    for exp in top5_exp:
+        # Filtered data
+        exp_filter = df_prod_filter[df_prod_filter['Exportador']==exp]
+        exp_usd_filter = (exp_filter['U$ FOB Tot'].sum() / exp_filter['Kg Neto'].sum() * 1000) if exp_filter['Kg Neto'].sum()>0 else 0
+        
+        # 12M data
+        exp_12m = df_prod_comp[df_prod_comp['Exportador']==exp]
+        exp_12m_grp = exp_12m.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'})
+        meses_act = len(exp_12m_grp[exp_12m_grp['U$ FOB Tot'] > 0])
+        exp_usd_12m = (exp_12m['U$ FOB Tot'].sum() / exp_12m['Kg Neto'].sum() * 1000) if exp_12m['Kg Neto'].sum()>0 else 0
+        
+        # Difference vs PF in the period
+        diff = exp_usd_filter - pf_usd_filter 
+        if exp_usd_filter > 0 and pf_usd_filter > 0:
+            diff_badge = f'<span style="color:{C["green"]}">' + (f'+${diff:,.0f}' if diff>0 else f'${diff:,.0f}') + '</span>' if diff >= 0 else f'<span style="color:{C["red"]}">${diff:,.0f}</span>'
+        else:
+            diff_badge = '<span style="color:gray">Sin Mov.</span>'
+            
+        usd_str = f"${exp_usd_filter:,.0f}" if exp_usd_filter > 0 else "—"
+        rows_t5 += f'<tr><td>{str(exp)[:35]}</td><td style="font-weight:700;">{usd_str}</td><td style="color:{C["muted"]}">${exp_usd_12m:,.0f}</td><td style="color:{C["muted"]}">{meses_act}/12</td><td>{diff_badge}</td></tr>'
+
+    st.markdown(f'<table class="styled"><tr><th>Exportador</th><th>USD/TM ({period_str})</th><th>Prom. 12M</th><th>Meses Activos</th><th>vs PF (Periodo)</th></tr>{rows_t5}</table>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════ TAB 8: CLIENTES ════════════════════════════
@@ -801,8 +848,10 @@ with tab8:
 
     # ── Rentabilidad por Cliente (directly from TD + Resumen) ──
     if len(df_td_cli) > 0 and len(df_rent) > 0:
+        rent_filter = df_rent  # No se aplica filtro de fechas global por petición del usuario para respetar los consolidados
+
         # Use Resumen data for TM and CFR, TD data for Utilidad and Margen
-        rent_cli = df_rent[df_rent['Cliente (Razón Social)'] != 'Cliente (Razón Social)'].groupby('Cliente (Razón Social)').agg({
+        rent_cli = rent_filter[rent_filter['Cliente (Razón Social)'] != 'Cliente (Razón Social)'].groupby('Cliente (Razón Social)').agg({
             'Cantidad':'sum', 'VALOR CFR':'sum'
         }).reset_index()
         rent_cli.columns = ['Cliente','TM_Vendidas','Venta_CFR']
@@ -956,9 +1005,11 @@ with tab10:
     st.markdown('<div class="section-title">Análisis de Rentabilidad por Producto</div>', unsafe_allow_html=True)
 
     if len(df_td_prod) > 0 and len(df_rent) > 0:
+        rent_filter = df_rent  # No se aplica filtro de fechas global por petición del usuario para respetar los consolidados
+
         # ── Static KPIs from Resumen totals ──
-        total_tm_vendidas = df_rent['Cantidad'].sum()
-        total_venta_cfr = df_rent['VALOR CFR'].sum()
+        total_tm_vendidas = rent_filter['Cantidad'].sum()
+        total_venta_cfr = rent_filter['VALOR CFR'].sum()
         total_util_neta = df_td_prod['Util_Total'].sum()
         total_mg_neto = (total_util_neta / total_venta_cfr * 100) if total_venta_cfr > 0 else 0
 
@@ -970,38 +1021,27 @@ with tab10:
         </div>""", unsafe_allow_html=True)
 
         # ── Use TD data directly for product profitability ──
-        # Map Corte from Resumen to TD product name for TM/CFR aggregation
-        corte_to_td = {
-            'Rejos': 'POTA REJOS CONGELADOS', 'Nucas': 'POTA NUCAS',
-            'Alas': 'POTA ALAS CONGELADAS', 'Filete': 'POTA FILETE CONGELADO',
-            'Daruma': 'POTA FILETE PRECOCIDO', 'Conos': 'POTA CONOS',
-            'Membrana': 'POTA MEMBRANA PRECOCIDA', 'Telilla': 'POTA  TELILLA PRECOCIDA',
-            'Residuos': 'RESIDUOS DE POTA',
-        }
-        # Alas Cocidas and Reproductores come from TD but have no direct Corte in Resumen
-        rent_by_corte = df_rent[df_rent['Corte'] != 'Corte'].groupby('Corte').agg({
-            'Cantidad':'sum', 'VALOR CFR':'sum'
+        # Group exactly by 'Producto' column from Resumen
+        rent_by_prod = rent_filter[rent_filter['Producto'].notna()].groupby('Producto').agg({
+            'Cantidad': 'sum', 'VALOR CFR': 'sum'
         }).reset_index()
-        rent_by_corte.columns = ['Corte','TM_Vendidas','Venta_CFR']
+        rent_by_prod.columns = ['Producto', 'TM_Vendidas', 'Venta_CFR']
+        rent_by_prod['Producto_UP'] = rent_by_prod['Producto'].astype(str).str.strip().str.upper()
 
         # Build final product list from TD (source of truth)
         final_prods = []
         for _, tdr in df_td_prod.iterrows():
-            td_name = str(tdr['Producto_TD']).strip()
-            # Find matching Corte
-            tm = 0.0
-            cfr = 0.0
-            for corte, td_prod in corte_to_td.items():
-                if td_prod.upper() == td_name.upper():
-                    match = rent_by_corte[rent_by_corte['Corte'] == corte]
-                    if len(match) > 0:
-                        tm = match['TM_Vendidas'].values[0]
-                        cfr = match['Venta_CFR'].values[0]
-                    break
+            td_name_display = str(tdr['Producto_TD']).strip()
+            td_name_up = td_name_display.upper()
+            
+            # Find matching product directly
+            match = rent_by_prod[rent_by_prod['Producto_UP'] == td_name_up]
+            tm = float(match['TM_Vendidas'].sum()) if len(match) > 0 else 0.0
+            cfr = float(match['Venta_CFR'].sum()) if len(match) > 0 else 0.0
             mg_raw = tdr['MG_Neto']
             mg = mg_raw * 100 if abs(mg_raw) < 2 else mg_raw
             final_prods.append({
-                'Producto': td_name, 'TM_Vendidas': tm, 'Venta_CFR': cfr,
+                'Producto': td_name_display, 'TM_Vendidas': tm, 'Venta_CFR': cfr,
                 'Util_Ene': tdr['Util_Ene'], 'Util_Feb': tdr['Util_Feb'], 'Util_Mar': tdr['Util_Mar'],
                 'Util_Neta': tdr['Util_Total'], 'MG_Neto': mg,
             })
@@ -1053,42 +1093,32 @@ with tab10:
         st.plotly_chart(fig_prod_bar, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Stacked cost chart + Pie
-        col_r1, col_r2 = st.columns(2)
-        with col_r1:
-            st.markdown('<div class="card-container">', unsafe_allow_html=True)
-            st.markdown(f'<b style="color:{C["white"]};">Costo Producción vs Margen Bruto (USD/TM)</b>', unsafe_allow_html=True)
-            # Use original aggregation for cost/price data
-            rent_grp = df_rent.groupby('Producto').agg({
-                'Cantidad':'sum', 'VALOR FOB':'sum', 'VALOR CFR':'sum',
-                'COSTO UNITARIO':'mean', 'Precio TM':'mean',
-                'UTILIDAD BRUTA':'sum'
-            }).reset_index()
-            rent_sorted = rent_grp.sort_values('VALOR FOB', ascending=False).head(10)
-            costos = []
-            margenes = []
-            for _, r in rent_sorted.iterrows():
-                costo = r['COSTO UNITARIO'] if pd.notna(r['COSTO UNITARIO']) else 0
-                precio = r['Precio TM'] if pd.notna(r['Precio TM']) else 0
-                margen = max(0, precio - costo)
-                costos.append(costo)
-                margenes.append(margen)
-            fig_r = go.Figure()
-            fig_r.add_trace(go.Bar(x=rent_sorted['Producto'].apply(lambda x: str(x)[:20]), y=costos, name='Costo Producción', marker_color='rgba(122,141,166,0.6)'))
-            fig_r.add_trace(go.Bar(x=rent_sorted['Producto'].apply(lambda x: str(x)[:20]), y=margenes, name='Margen Bruto', marker_color=C['green']))
-            fig_r.update_layout(barmode='stack', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
-                legend=dict(orientation='h', y=-0.25), margin=dict(l=0,r=0,t=10,b=80), height=380,
-                yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), xaxis=dict(tickangle=-45))
-            st.plotly_chart(fig_r, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-        with col_r2:
-            st.markdown('<div class="card-container">', unsafe_allow_html=True)
-            st.markdown(f'<b style="color:{C["white"]};">Contribución al Resultado (FOB)</b>', unsafe_allow_html=True)
-            fig_cont = go.Figure(go.Pie(labels=rent_sorted['Producto'], values=rent_sorted['VALOR FOB'], hole=0.5,
-                marker_colors=[PRODUCT_COLORS.get(p, C['muted']) for p in rent_sorted['Producto']], textinfo='label+percent', textfont_size=11))
-            fig_cont.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'], showlegend=False, margin=dict(l=0,r=0,t=10,b=0), height=380)
-            st.plotly_chart(fig_cont, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        # Stacked cost chart
+        st.markdown('<div class="card-container">', unsafe_allow_html=True)
+        st.markdown(f'<b style="color:{C["white"]};">Costo Producción vs Margen Bruto (USD/TM)</b>', unsafe_allow_html=True)
+        # Use original aggregation for cost/price data
+        rent_grp = df_rent.groupby('Producto').agg({
+            'Cantidad':'sum', 'VALOR FOB':'sum', 'VALOR CFR':'sum',
+            'COSTO UNITARIO':'mean', 'Precio TM':'mean',
+            'UTILIDAD BRUTA':'sum'
+        }).reset_index()
+        rent_sorted = rent_grp.sort_values('VALOR FOB', ascending=False).head(10)
+        costos = []
+        margenes = []
+        for _, r in rent_sorted.iterrows():
+            costo = r['COSTO UNITARIO'] if pd.notna(r['COSTO UNITARIO']) else 0
+            precio = r['Precio TM'] if pd.notna(r['Precio TM']) else 0
+            margen = max(0, precio - costo)
+            costos.append(costo)
+            margenes.append(margen)
+        fig_r = go.Figure()
+        fig_r.add_trace(go.Bar(x=rent_sorted['Producto'].apply(lambda x: str(x)[:20]), y=costos, name='Costo Producción', marker_color='rgba(122,141,166,0.6)'))
+        fig_r.add_trace(go.Bar(x=rent_sorted['Producto'].apply(lambda x: str(x)[:20]), y=margenes, name='Margen Bruto', marker_color=C['green']))
+        fig_r.update_layout(barmode='stack', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
+            legend=dict(orientation='h', y=-0.25), margin=dict(l=0,r=0,t=10,b=80), height=380,
+            yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), xaxis=dict(tickangle=-45))
+        st.plotly_chart(fig_r, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
         # Executive insight
         criticos_list = [str(r['Producto'])[:20] for _, r in df_final_prod.iterrows() if r['Util_Neta'] < 0]
