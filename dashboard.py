@@ -310,8 +310,11 @@ def load_cxc():
 @st.cache_data
 def load_td_tables():
     """Load product and client profitability tables from TD sheet"""
-    path = os.path.join(os.path.dirname(__file__), "INPUT", "Rentabilidad por FP 2026.xlsx")
-    if not os.path.exists(path): return pd.DataFrame(), pd.DataFrame()
+    import glob
+    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
+    r_files = glob.glob(os.path.join(input_dir, "Rentabilidad*.xlsx"))
+    if not r_files: return pd.DataFrame(), pd.DataFrame()
+    path = max(r_files, key=os.path.getmtime)
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb['TD']
     
