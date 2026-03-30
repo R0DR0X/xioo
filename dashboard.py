@@ -100,9 +100,8 @@ st.markdown(f"""<style>
     .mc-label {{ color: {C['muted']}; font-size: 0.7rem; font-weight: 600; }}
     .mc-value {{ font-size: 1.3rem; font-weight: 800; margin-top: 2px; }}
     .mc1 .mc-value {{ color: {C['cyan']}; }}
-    .mc2 .mc-value {{ color: {C['text']}; }}
     .mc3 .mc-value {{ color: {C['orange']}; }}
-    .mc4 .mc-value {{ color: {C['text']}; }}
+    .mc2 .mc-value, .mc4 .mc-value {{ color: {C['white']}; }}
     .part-card {{ background: {C['card']}; border: 1px solid {C['border']}; border-radius: 12px; padding: 24px; text-align: center; }}
     .part-pct {{ font-size: 2rem; font-weight: 800; margin: 12px 0 4px; }}
     .part-sub {{ color: {C['muted']}; font-size: 0.78rem; }}
@@ -247,11 +246,21 @@ def load_inventario():
         
         all_months[sheet_name] = df_month
     
-    # Build the latest month DataFrame (first sheet) with extra calculated fields
-    latest_key = wb.sheetnames[0] if wb.sheetnames else None
+    # Build the latest month DataFrame
+    # Target common sheet names or the first one if not found
+    target_sheets = ['Marzo2026', 'Abril2026', 'Mayo2026', 'Junio2026', 'Febrero2026', 'Enero2026']
+    latest_key = None
+    for ts in target_sheets:
+        if ts in all_months:
+            latest_key = ts
+            break
+    if not latest_key and all_months:
+        latest_key = list(all_months.keys())[0]
+            
     df_latest = pd.DataFrame()
     if latest_key and latest_key in all_months:
         df_latest = all_months[latest_key].copy()
+        # Keep only rows with valid material and some movement/stock
         df_latest = df_latest[df_latest['STOCK_KG'] > 0]
         df_latest['TM'] = df_latest['STOCK_KG'] / 1000
     
