@@ -307,16 +307,25 @@ inv_months, df_inv = load_inventario()
 df_cxc = load_cxc()
 df_td_prod, df_td_cli = load_td_tables()
 
-def apply_fob_filter(df):
-    """Filter rows by specific precise valid FOB/KG ranges per product"""
-    m_fil_con = (df['PRODUCTO']=='FILETE CONGELADO') & (df['FOB_KG']>=0.7) & (df['FOB_KG']<=2.4)
-    m_ala_con = (df['PRODUCTO']=='ALAS CONGELADAS') & (df['FOB_KG']>=0.7) & (df['FOB_KG']<=2.4)
-    m_nuc = (df['PRODUCTO']=='NUCA') & (df['FOB_KG']>=0.5) & (df['FOB_KG']<=2.0)
-    m_tent_rep = (df['PRODUCTO'].isin(['TENTACULO','REPRODUCTOR'])) & (df['FOB_KG']>=1.0) & (df['FOB_KG']<=3.3)
-    m_ala_coc = (df['PRODUCTO']=='ALAS COCIDAS') & (df['FOB_KG']>=1.0) & (df['FOB_KG']<=5.0)
-    m_fil_coc = (df['PRODUCTO']=='FILETE COCIDO') & (df['FOB_KG']>=1.0) & (df['FOB_KG']<=5.0)
-    mask_no_product = (df['PRODUCTO'].isna()) | (df['PRODUCTO']=='')
-    return df[m_fil_con | m_ala_con | m_nuc | m_tent_rep | m_ala_coc | m_fil_coc | mask_no_product]
+# Default FOB/KG ranges per product
+DEFAULT_RANGES = {
+    'FILETE CONGELADO': (0.7, 2.4),
+    'ALAS CONGELADAS': (0.7, 2.4),
+    'NUCA': (0.5, 2.0),
+    'TENTACULO': (1.0, 3.3),
+    'REPRODUCTOR': (1.0, 3.3),
+    'ALAS COCIDAS': (1.0, 5.0),
+    'FILETE COCIDO': (1.0, 5.0),
+}
+
+def apply_fob_filter(df, ranges=None):
+    """Filter rows by configurable FOB/KG ranges per product"""
+    if ranges is None:
+        ranges = DEFAULT_RANGES
+    mask = (df['PRODUCTO'].isna()) | (df['PRODUCTO']=='')
+    for prod, (lo, hi) in ranges.items():
+        mask = mask | ((df['PRODUCTO']==prod) & (df['FOB_KG']>=lo) & (df['FOB_KG']<=hi))
+    return df[mask]
 
 def is_pf(name):
     return 'PERU FROST' in str(name).upper()
@@ -340,9 +349,44 @@ with st.sidebar:
     st.markdown(f"<div style='color:{C['muted']};font-size:0.75rem;margin-top:8px;'>Registros totales: <b style=\"color:{C['white']}\">{len(df_raw):,}</b></div>", unsafe_allow_html=True)
     st.markdown("---")
 
+    # ── Registro: configuración de rangos FOB/KG por producto ──
+    with st.expander("📋 Registro — Rangos FOB/KG", expanded=False):
+        st.markdown(f"<div style='color:{C['muted']};font-size:0.78rem;margin-bottom:8px;'>Configura el intervalo de precio FOB/KG válido para cada producto. Modifica los valores y presiona <b style=\"color:{C['cyan']}\">Aplicar</b>.</div>", unsafe_allow_html=True)
+        
+        # Initialize session_state with defaults if not set
+        if 'fob_ranges' not in st.session_state:
+            st.session_state['fob_ranges'] = {k: list(v) for k, v in DEFAULT_RANGES.items()}
+        
+        temp_ranges = {}
+        for prod in DEFAULT_RANGES:
+            cur_lo, cur_hi = st.session_state['fob_ranges'][prod]
+            st.markdown(f"<div style='color:{C['cyan']};font-size:0.82rem;font-weight:600;margin-top:6px;'>{prod}</div>", unsafe_allow_html=True)
+            col_lo, col_hi = st.columns(2)
+            with col_lo:
+                lo = st.number_input("Mín", value=float(cur_lo), min_value=0.0, max_value=20.0, step=0.1, key=f"tmp_lo_{prod}", label_visibility="collapsed")
+                st.caption("Mínimo")
+            with col_hi:
+                hi = st.number_input("Máx", value=float(cur_hi), min_value=0.0, max_value=20.0, step=0.1, key=f"tmp_hi_{prod}", label_visibility="collapsed")
+                st.caption("Máximo")
+            temp_ranges[prod] = (lo, hi)
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("✅ Aplicar", use_container_width=True, key="btn_apply_ranges"):
+                st.session_state['fob_ranges'] = {k: list(v) for k, v in temp_ranges.items()}
+                st.rerun()
+        with col_btn2:
+            if st.button("🔄 Restaurar", use_container_width=True, key="btn_reset_ranges"):
+                st.session_state['fob_ranges'] = {k: list(v) for k, v in DEFAULT_RANGES.items()}
+                st.rerun()
+    
+    # Build final user_ranges from session_state
+    user_ranges = {k: tuple(v) for k, v in st.session_state.get('fob_ranges', DEFAULT_RANGES).items()}
+    st.markdown("---")
+
 # Apply date filter
 df_dated = df_raw[(df_raw['Fecha'].dt.date >= d_start) & (df_raw['Fecha'].dt.date <= d_end)]
-df = apply_fob_filter(df_dated)
+df = apply_fob_filter(df_dated, user_ranges)
 
 # Subsets
 df_pf = df[df['Exportador'].apply(is_pf)]
@@ -595,21 +639,35 @@ with tab5:
             <div class="metric-card mc4"><div class="mc-label">Posición PF</div><div class="mc-value">#{pf_pos}</div></div>
         </div>""", unsafe_allow_html=True)
 
-        # Bar chart by exporter (Ensure PF is always visible)
-        st.markdown('<div class="card-container" style="margin-top:20px;">', unsafe_allow_html=True)
-        st.markdown(f'<b style="color:{C["white"]};">USD/TM por Exportador — {selected_prod}</b>', unsafe_allow_html=True)
-        exp_grp_all = prod_data.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False)
+        # Bar chart by exporter — use Top 15 from Rankings (Fresco or Cocido)
+        is_cocido_prod = selected_prod in PROD_COCIDO
+        if is_cocido_prod:
+            rank_subset = df_classified[df_classified['PRODUCTO'].isin(PROD_COCIDO)]
+            rank_label = "Cocido"
+        else:
+            rank_subset = df_classified[df_classified['PRODUCTO'].isin(PROD_FRESCO)]
+            rank_label = "Fresco"
+        
+        # Get Top 15 exporters by FOB from the ranking category
+        rank_top15 = rank_subset.groupby('Exportador')['U$ FOB Tot'].sum().sort_values(ascending=False).head(15).index.tolist()
+        
+        # Always include PF
+        pf_in_data = [e for e in prod_data['Exportador'].unique() if is_pf(e)]
+        for pf_e in pf_in_data:
+            if pf_e not in rank_top15:
+                rank_top15.append(pf_e)
+        
+        # Filter product data to only these top 15 exporters
+        prod_top15 = prod_data[prod_data['Exportador'].isin(rank_top15)]
+        exp_grp_all = prod_top15.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False)
         exp_grp_all['USD_TM'] = (exp_grp_all['U$ FOB Tot']/exp_grp_all['Kg Neto']*1000).fillna(0)
+        # Remove exporters with 0 volume for this specific product
+        exp_grp_all = exp_grp_all[exp_grp_all['Kg Neto'] > 0]
         
-        # Take Top 15, but MUST include PF if they have data for this product
-        top_15 = exp_grp_all.head(15).copy()
-        pf_rows = exp_grp_all[exp_grp_all.index.map(is_pf)]
-        if not pf_rows.empty:
-            pf_name = pf_rows.index[0]
-            if pf_name not in top_15.index:
-                top_15 = pd.concat([top_15, pf_rows])
+        st.markdown('<div class="card-container" style="margin-top:20px;">', unsafe_allow_html=True)
+        st.markdown(f'<b style="color:{C["white"]};">USD/TM por Exportador — {selected_prod} (Top 15 {rank_label})</b>', unsafe_allow_html=True)
         
-        exp_grp = top_15.sort_values('U$ FOB Tot', ascending=False).reset_index()
+        exp_grp = exp_grp_all.reset_index()
         exp_grp['short_name'] = exp_grp['Exportador'].apply(lambda x: x[:25]+'...' if len(x)>25 else x)
         colors = [C['cyan'] if is_pf(e) else 'rgba(122,141,166,0.67)' for e in exp_grp['Exportador']]
         fig_exp = go.Figure(go.Bar(x=exp_grp['short_name'], y=exp_grp['USD_TM'], marker_color=colors))
