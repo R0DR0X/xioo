@@ -329,13 +329,8 @@ def fmt_pct(v): return f"{v:.2f}%" if pd.notna(v) else "—"
 with st.sidebar:
     st.markdown(f"<div style='color:{C['cyan']};font-weight:800;font-size:1.1rem;margin-bottom:16px;'>⚙️ FILTROS</div>", unsafe_allow_html=True)
     min_date = df_raw['Fecha'].min().date()
-    max_date = df_raw['Fecha'].max().date()
-    
-    # Ensure rentabilidad dates are accessible if they go beyond veritrade entries
-    if len(df_rent) > 0 and 'Fecha Embarque' in df_rent.columns:
-        rent_max = df_rent['Fecha Embarque'].max()
-        if pd.notna(rent_max):
-            max_date = max(max_date, rent_max.date())
+    # Force max limit to March 18th as requested
+    max_date = datetime(2026, 3, 18).date()
 
     date_range = st.date_input("📅 Rango de Fechas", value=(min_date, max_date), min_value=min_date, max_value=max_date, key="date_filter")
     if isinstance(date_range, tuple) and len(date_range)==2:
