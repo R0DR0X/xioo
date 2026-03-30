@@ -44,6 +44,12 @@ PROD_COCIDO = ["ALAS COCIDAS", "FILETE COCIDO"]
 # ── CSS ──────────────────────────────────────────────────────
 st.markdown(f"""<style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+    
+    /* Global fixes for Safari/Webkit dark mode text colors */
+    .stApp, .stApp p, .stApp span, .stApp div, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6, .stApp label, .stApp li {{
+        color: {C['text']};
+    }}
+    
     .stApp {{ background: linear-gradient(180deg, {C['grad1']}, {C['grad2']}); font-family: 'Inter', sans-serif; }}
     header[data-testid="stHeader"] {{ background: transparent; }}
     .block-container {{ padding-top: 1rem; max-width: 1400px; }}
@@ -150,9 +156,15 @@ def load_rentabilidad():
 
 @st.cache_data
 def load_inventario():
-    """Load inventory data from ALL monthly sheets, dynamically finding MOVIMIENTO INVENTARIO columns."""
-    path = os.path.join(os.path.dirname(__file__), "INPUT", "inventario PT al 23-03-2026 (2).xlsx")
-    if not os.path.exists(path): return {}, pd.DataFrame()
+    import glob
+    input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
+    # Auto-detect any inventory excel file in the directory
+    inv_files = glob.glob(os.path.join(input_dir, "inventario*.xlsx"))
+    if not inv_files:
+        return {}, pd.DataFrame()
+    # If multiple, pick the most recently modified
+    path = max(inv_files, key=os.path.getmtime)
+    
     wb = openpyxl.load_workbook(path, data_only=True)
     
     all_months = {}  # {month_name: DataFrame}
@@ -353,35 +365,39 @@ with st.sidebar:
     with st.expander("📋 Registro — Rangos FOB/KG", expanded=False):
         st.markdown(f"<div style='color:{C['muted']};font-size:0.78rem;margin-bottom:8px;'>Configura el intervalo de precio FOB/KG válido para cada producto. Modifica los valores y presiona <b style=\"color:{C['cyan']}\">Aplicar</b>.</div>", unsafe_allow_html=True)
         
-        # Initialize session_state with defaults if not set
-        if 'fob_ranges' not in st.session_state:
-            st.session_state['fob_ranges'] = {k: list(v) for k, v in DEFAULT_RANGES.items()}
+        # Initialize widget keys in session_state ONLY if they don't exist yet
+        for prod, (def_lo, def_hi) in DEFAULT_RANGES.items():
+            if f"rng_lo_{prod}" not in st.session_state:
+                st.session_state[f"rng_lo_{prod}"] = def_lo
+            if f"rng_hi_{prod}" not in st.session_state:
+                st.session_state[f"rng_hi_{prod}"] = def_hi
         
-        temp_ranges = {}
         for prod in DEFAULT_RANGES:
-            cur_lo, cur_hi = st.session_state['fob_ranges'][prod]
             st.markdown(f"<div style='color:{C['cyan']};font-size:0.82rem;font-weight:600;margin-top:6px;'>{prod}</div>", unsafe_allow_html=True)
             col_lo, col_hi = st.columns(2)
             with col_lo:
-                lo = st.number_input("Mín", value=float(cur_lo), min_value=0.0, max_value=20.0, step=0.1, key=f"tmp_lo_{prod}", label_visibility="collapsed")
+                st.number_input("Mín", min_value=0.0, max_value=20.0, step=0.1, key=f"rng_lo_{prod}", label_visibility="collapsed")
                 st.caption("Mínimo")
             with col_hi:
-                hi = st.number_input("Máx", value=float(cur_hi), min_value=0.0, max_value=20.0, step=0.1, key=f"tmp_hi_{prod}", label_visibility="collapsed")
+                st.number_input("Máx", min_value=0.0, max_value=20.0, step=0.1, key=f"rng_hi_{prod}", label_visibility="collapsed")
                 st.caption("Máximo")
-            temp_ranges[prod] = (lo, hi)
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button("✅ Aplicar", use_container_width=True, key="btn_apply_ranges"):
-                st.session_state['fob_ranges'] = {k: list(v) for k, v in temp_ranges.items()}
-                st.rerun()
+            st.button("✅ Aplicar", use_container_width=True, key="btn_apply_ranges")
         with col_btn2:
             if st.button("🔄 Restaurar", use_container_width=True, key="btn_reset_ranges"):
-                st.session_state['fob_ranges'] = {k: list(v) for k, v in DEFAULT_RANGES.items()}
+                for prod, (def_lo, def_hi) in DEFAULT_RANGES.items():
+                    st.session_state[f"rng_lo_{prod}"] = def_lo
+                    st.session_state[f"rng_hi_{prod}"] = def_hi
                 st.rerun()
     
-    # Build final user_ranges from session_state
-    user_ranges = {k: tuple(v) for k, v in st.session_state.get('fob_ranges', DEFAULT_RANGES).items()}
+    # Build user_ranges directly from widget session_state keys (always current)
+    user_ranges = {}
+    for prod in DEFAULT_RANGES:
+        lo = st.session_state.get(f"rng_lo_{prod}", DEFAULT_RANGES[prod][0])
+        hi = st.session_state.get(f"rng_hi_{prod}", DEFAULT_RANGES[prod][1])
+        user_ranges[prod] = (lo, hi)
     st.markdown("---")
 
 # Apply date filter
@@ -801,9 +817,9 @@ with tab7:
     df_prod = df_comp_cl[df_comp_cl['PRODUCTO']==selected_prod_t5]
     # PF data
     df_prod_pf = df_prod[df_prod['Exportador'].apply(is_pf)]
-    # Top 5 competitors (by FOB, excluding PF)
+    # Top 5 competitors (by Volume/Tonnes, excluding PF)
     df_prod_comp = df_prod[~df_prod['Exportador'].apply(is_pf)]
-    top5_exp = df_prod_comp.groupby('Exportador')['U$ FOB Tot'].sum().nlargest(5).index.tolist()
+    top5_exp = df_prod_comp.groupby('Exportador')['Kg Neto'].sum().nlargest(5).index.tolist()
 
     # Multi-line chart: price evolution PF vs Top 5
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
