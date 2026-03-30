@@ -235,8 +235,9 @@ def load_inventario():
     df_latest = pd.DataFrame()
     if latest_key and latest_key in all_months:
         df_latest = all_months[latest_key].copy()
-        # Keep only rows with valid material and some movement/stock
-        df_latest = df_latest[df_latest['STOCK_KG'] > 0]
+        # Keep only rows with valid material and any movement/stock
+        mask = (df_latest['STOCK_INICIAL'] > 0) | (df_latest['INGRESOS'] > 0) | (df_latest['SALIDAS'] > 0) | (df_latest['STOCK_KG'] > 0)
+        df_latest = df_latest[mask]
         df_latest['TM'] = df_latest['STOCK_KG'] / 1000
     
     wb.close()
@@ -255,21 +256,33 @@ def load_cxc():
     # Use 'Data' sheet if it exists, otherwise fallback to the first active sheet
     ws = wb['Data'] if 'Data' in wb.sheetnames else wb.active
 
+    # Dynamically find column indices from Row 1
+    cols = {}
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(1, c).value
+        if v:
+            v_up = str(v).upper().strip()
+            if 'UNIDAD DE NEGOCIO' in v_up: cols['unidad'] = c
+            elif 'USD HOMOL' in v_up: cols['usd'] = c
+            elif 'NOMBRE DE CLIENTE' in v_up: cols['nombre'] = c
+            elif 'DOCUMENTO' in v_up and 'CLASE' not in v_up and 'FECHA' not in v_up and 'MONEDA' not in v_up: cols['ndoc'] = c
+            elif 'FECHA IDEAL' in v_up: cols['fecha_ideal'] = c
+            elif 'ATRASADOS' in v_up: cols['dias'] = c
+
     rows = []
     for r in range(2, ws.max_row + 1):
-        unidad = ws.cell(r, 11).value  # K = UNIDAD DE NEGOCIO
+        unidad = ws.cell(r, cols.get('unidad', 11)).value
         # Filter strict: Only EXPORTACIÓN and positive values (>0)
         if not unidad or 'EXPORT' not in str(unidad).upper():
             continue
-        usd_homol = ws.cell(r, 16).value  # P = USD HOMOL
+        usd_homol = ws.cell(r, cols.get('usd', 16)).value
         if not usd_homol or float(usd_homol) <= 0:
             continue
         
-        nombre = ws.cell(r, 2).value      # B = Nombre de cliente
-        n_doc = ws.cell(r, 4).value       # D = Nº documento
-        fecha_ideal = ws.cell(r, 12).value # L = Fecha Ideal Pago
-        usd_homol = ws.cell(r, 16).value  # P = USD HOMOL
-        dias_q = ws.cell(r, 17).value     # Q = DÍAS ATRASADOS (fallback)
+        nombre = ws.cell(r, cols.get('nombre', 2)).value
+        n_doc = ws.cell(r, cols.get('ndoc', 3)).value
+        fecha_ideal = ws.cell(r, cols.get('fecha_ideal', 12)).value
+        dias_q = ws.cell(r, cols.get('dias', 17)).value
         
         # Calculate dias dynamically if possible
         dias = float(dias_q) if dias_q is not None else 0
