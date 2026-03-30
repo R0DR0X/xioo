@@ -270,7 +270,9 @@ def load_cxc():
         path = max(cxc_files, key=os.path.getmtime)
     
     wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb['Sheet1']
+    # Use 'Data' sheet if it exists, otherwise fallback to the first active sheet
+    ws = wb['Data'] if 'Data' in wb.sheetnames else wb.active
+
     rows = []
     for r in range(2, ws.max_row + 1):
         unidad = ws.cell(r, 11).value  # K = UNIDAD DE NEGOCIO
