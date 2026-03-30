@@ -225,14 +225,18 @@ def load_inventario():
         
         all_months[sheet_name] = df_month
     
-    # Build the latest month DataFrame
-    # Target common sheet names or the first one if not found
-    target_sheets = ['Marzo2026', 'Abril2026', 'Mayo2026', 'Junio2026', 'Febrero2026', 'Enero2026']
+        all_months[sheet_name] = df_month
+    
+    # Target common sheet names (ignore case and spaces)
+    target_sheets = ['marzo2026', 'abril2026', 'mayo2026', 'junio2026', 'febrero2026', 'enero2026']
     latest_key = None
+    all_months_clean = {k.lower().replace(" ", ""): k for k in all_months.keys()}
+    
     for ts in target_sheets:
-        if ts in all_months:
-            latest_key = ts
+        if ts in all_months_clean:
+            latest_key = all_months_clean[ts]
             break
+            
     if not latest_key and all_months:
         latest_key = list(all_months.keys())[0]
             
@@ -1117,8 +1121,7 @@ with tab9:
         st.markdown(f'<table class="styled"><tr><th>Cód. SAP</th><th>Material</th><th>Stock Inicial (TM)</th><th style="color:{C["green"]}">Ingresos (TM)</th><th style="color:{C["red"]}">Salidas (TM)</th><th style="color:{C["cyan"]}">Stock Final (TM)</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("No se encontró el archivo de inventario en INPUT/")
-
+        st.warning("⚠️ **Inventario vacío o fórmulas no calculadas:** No se encontraron productos con stock en el mes actual. Si acabas de subir el Excel desde Drive o un software externo, **ábrelo en tu Excel de escritorio y presiona 'Guardar'**. Esto obliga a Excel a calcular las fórmulas para que el Dashboard pueda leer los valores finales.")
 
 # ═══════════════ TAB 10: RENTABILIDAD ═══════════════════════
 with tab10:
