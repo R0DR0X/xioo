@@ -9,6 +9,51 @@ warnings.filterwarnings('ignore')
 # ── Page Config ──────────────────────────────────────────────
 st.set_page_config(page_title="PERU FROST SAC — Dashboard Ejecutivo", layout="wide", page_icon="🦑")
 
+# ── Password Protection ──────────────────────────────────────
+def check_password():
+    """Devuelve True si el usuario ingresó la contraseña correcta."""
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
+
+    if st.session_state["password_correct"]:
+        return True
+
+    # Login UI
+    st.markdown("""
+        <style>
+        .login-box {
+            background-color: #0f1f38;
+            padding: 40px;
+            border-radius: 15px;
+            border: 1px solid #00d4aa;
+            max-width: 500px;
+            margin: auto;
+            text-align: center;
+            margin-top: 50px;
+        }
+        </style>
+        <div class="login-box">
+            <h1 style="color:white; margin-bottom:10px;">🔒 Acceso Restringido</h1>
+            <p style="color:#7a8da6;">Dashboard Ejecutivo - PERU FROST S.A.C.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    password = st.text_input("Ingrese la clave de acceso:", type="password")
+    
+    if st.button("Ingresar"):
+        if password == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            st.rerun()
+        else:
+            st.error("😕 Clave incorrecta")
+    return False
+
+if not check_password():
+    st.stop()
+
+# Acceso Concedido
+st.toast("🔑 Acceso Concedido!", icon="✅")
+
 # ── Theme Colors ─────────────────────────────────────────────
 C = dict(
     bg="#0a1628", card="#0f1f38", card2="#162a4a", border="#1e3a5f",
