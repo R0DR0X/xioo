@@ -153,7 +153,7 @@ st.markdown(f"""<style>
 </style>""", unsafe_allow_html=True)
 
 # ── Data Loading ─────────────────────────────────────────────
-@st.cache_data
+@st.cache_data(ttl=300, max_entries=5)
 def load_data():
     base_dir = os.path.dirname(__file__)
     dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
@@ -175,7 +175,7 @@ def load_data():
 
 df_raw = load_data()
 
-@st.cache_data
+@st.cache_data(ttl=300, max_entries=5)
 def load_rentabilidad():
     base_dir = os.path.dirname(__file__)
     dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
@@ -225,7 +225,7 @@ def load_rentabilidad():
 
     return df, "Filtered columns applied"
 
-@st.cache_data
+@st.cache_data(ttl=300, max_entries=5)
 def load_inventario():
     import glob
     input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
@@ -309,7 +309,7 @@ def load_inventario():
     wb.close()
     return all_months, df_latest
 
-@st.cache_data
+@st.cache_data(ttl=300, max_entries=5)
 def load_cxc():
     """Load CxC independent rows from Sheet1: Cliente, Nº documento, Deuda (USD HOMOL), Días Atrasados"""
     base_dir = os.path.dirname(__file__)
@@ -376,7 +376,7 @@ def load_cxc():
     df = pd.DataFrame(rows)
     return df.sort_values(['Cliente', 'Deuda_Pendiente'], ascending=[True, False])
 
-@st.cache_data
+@st.cache_data(ttl=300, max_entries=5)
 def load_td_tables():
     """Load product and client profitability tables from TD sheet"""
     base_dir = os.path.dirname(__file__)
@@ -471,6 +471,9 @@ def fmt_pct(v): return f"{v:.2f}%" if pd.notna(v) else "—"
 
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
+    if st.button("🔄 Actualizar Datos", use_container_width=True, type="primary"):
+        st.cache_data.clear()
+        st.rerun()
     st.markdown(f"<div style='color:{C['cyan']};font-weight:800;font-size:1.1rem;margin-bottom:16px;'>⚙️ FILTROS</div>", unsafe_allow_html=True)
     min_date = df_raw['Fecha'].min().date()
     # Force max limit to March 18th as requested
@@ -712,6 +715,23 @@ with tab3:
         legend=dict(orientation='h', y=-0.15), margin=dict(l=0,r=0,t=10,b=40), height=350, yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'))
     st.plotly_chart(fig_comp, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="section-title">Participación de Mercado por País (Top 4 PF)</div>', unsafe_allow_html=True)
+    top4_pf = pf_country_comp.sort_values('U$ FOB Tot', ascending=False).head(4)
+    market_parts = []
+    colors_4 = [C['cyan'], C['green'], C['blue'], C['orange']]
+    for i, row in enumerate(top4_pf.iterrows()):
+        pais = row[1]['Pais de Destino']
+        pf_fob_pais = row[1]['U$ FOB Tot']
+        total_fob_pais = df[df['Pais de Destino']==pais]['U$ FOB Tot'].sum()
+        pct = (pf_fob_pais / total_fob_pais * 100) if total_fob_pais > 0 else 0
+        market_parts.append((f"{pais} (FOB)", pct, fmt_usd(pf_fob_pais), colors_4[i % 4]))
+    
+    if len(market_parts) > 0:
+        cols_m = st.columns(len(market_parts))
+        for i, (label, pct, sub, color) in enumerate(market_parts):
+            cols_m[i].markdown(f"""<div class="part-card"><div style="color:{C['muted']};font-weight:600;font-size:0.85rem;text-transform:uppercase;">{label}</div>
+            <div class="part-pct" style="color:{color};">{pct:.2f}%</div><div class="part-sub">PF: {sub}</div></div>""", unsafe_allow_html=True)
 
 # ═══════════════ TAB 4: RANKINGS TOP 15 ═════════════════════
 with tab4:
