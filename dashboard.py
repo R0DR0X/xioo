@@ -153,7 +153,7 @@ st.markdown(f"""<style>
 </style>""", unsafe_allow_html=True)
 
 # ── Data Loading ─────────────────────────────────────────────
-@st.cache_data(ttl=300, max_entries=5)
+@st.cache_data
 def load_data():
     base_dir = os.path.dirname(__file__)
     dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
@@ -175,7 +175,7 @@ def load_data():
 
 df_raw = load_data()
 
-@st.cache_data(ttl=300, max_entries=5)
+@st.cache_data
 def load_rentabilidad():
     base_dir = os.path.dirname(__file__)
     dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
@@ -225,7 +225,7 @@ def load_rentabilidad():
 
     return df, "Filtered columns applied"
 
-@st.cache_data(ttl=300, max_entries=5)
+@st.cache_data
 def load_inventario():
     import glob
     input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
@@ -309,7 +309,7 @@ def load_inventario():
     wb.close()
     return all_months, df_latest
 
-@st.cache_data(ttl=300, max_entries=5)
+@st.cache_data
 def load_cxc():
     """Load CxC independent rows from Sheet1: Cliente, Nº documento, Deuda (USD HOMOL), Días Atrasados"""
     base_dir = os.path.dirname(__file__)
@@ -376,7 +376,7 @@ def load_cxc():
     df = pd.DataFrame(rows)
     return df.sort_values(['Cliente', 'Deuda_Pendiente'], ascending=[True, False])
 
-@st.cache_data(ttl=300, max_entries=5)
+@st.cache_data
 def load_td_tables():
     """Load product and client profitability tables from TD sheet"""
     base_dir = os.path.dirname(__file__)
@@ -471,13 +471,9 @@ def fmt_pct(v): return f"{v:.2f}%" if pd.notna(v) else "—"
 
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
-    if st.button("🔄 Actualizar Datos", use_container_width=True, type="primary"):
-        st.cache_data.clear()
-        st.rerun()
     st.markdown(f"<div style='color:{C['cyan']};font-weight:800;font-size:1.1rem;margin-bottom:16px;'>⚙️ FILTROS</div>", unsafe_allow_html=True)
     min_date = df_raw['Fecha'].min().date()
-    # Force max limit to March 18th as requested
-    max_date = datetime(2026, 3, 18).date()
+    max_date = df_raw['Fecha'].max().date()
 
     date_range = st.date_input("📅 Rango de Fechas", value=(min_date, max_date), min_value=min_date, max_value=max_date, key="date_filter")
     if isinstance(date_range, tuple) and len(date_range)==2:
@@ -488,42 +484,42 @@ with st.sidebar:
     st.markdown("---")
 
     # ── Registro: configuración de rangos FOB/KG por producto ──
-    with st.expander("📋 Registro — Rangos FOB/KG", expanded=False):
-        st.markdown(f"<div style='color:{C['muted']};font-size:0.78rem;margin-bottom:8px;'>Configura el intervalo de precio FOB/KG válido para cada producto. Modifica los valores y presiona <b style=\"color:{C['cyan']}\">Aplicar</b>.</div>", unsafe_allow_html=True)
-        
-        # Initialize widget keys in session_state ONLY if they don't exist yet
-        for prod, (def_lo, def_hi) in DEFAULT_RANGES.items():
-            if f"rng_lo_{prod}" not in st.session_state:
-                st.session_state[f"rng_lo_{prod}"] = def_lo
-            if f"rng_hi_{prod}" not in st.session_state:
-                st.session_state[f"rng_hi_{prod}"] = def_hi
-        
-        for prod in DEFAULT_RANGES:
-            st.markdown(f"<div style='color:{C['cyan']};font-size:0.82rem;font-weight:600;margin-top:6px;'>{prod}</div>", unsafe_allow_html=True)
-            col_lo, col_hi = st.columns(2)
-            with col_lo:
-                st.number_input("Mín", min_value=0.0, max_value=20.0, step=0.1, key=f"rng_lo_{prod}", label_visibility="collapsed")
-                st.caption("Mínimo")
-            with col_hi:
-                st.number_input("Máx", min_value=0.0, max_value=20.0, step=0.1, key=f"rng_hi_{prod}", label_visibility="collapsed")
-                st.caption("Máximo")
-        
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            st.button("✅ Aplicar", use_container_width=True, key="btn_apply_ranges")
-        with col_btn2:
-            if st.button("🔄 Restaurar", use_container_width=True, key="btn_reset_ranges"):
-                for prod, (def_lo, def_hi) in DEFAULT_RANGES.items():
-                    st.session_state[f"rng_lo_{prod}"] = def_lo
-                    st.session_state[f"rng_hi_{prod}"] = def_hi
-                st.rerun()
-    
+    # with st.expander("📋 Registro — Rangos FOB/KG", expanded=False):
+    #     st.markdown(f"<div style='color:{C['muted']};font-size:0.78rem;margin-bottom:8px;'>Configura el intervalo de precio FOB/KG válido para cada producto. Modifica los valores y presiona <b style=\"color:{C['cyan']}\">Aplicar</b>.</div>", unsafe_allow_html=True)
+    #     
+    #     # Initialize widget keys in session_state ONLY if they don't exist yet
+    #     for prod, (def_lo, def_hi) in DEFAULT_RANGES.items():
+    #         if f"rng_lo_{prod}" not in st.session_state:
+    #             st.session_state[f"rng_lo_{prod}"] = def_lo
+    #         if f"rng_hi_{prod}" not in st.session_state:
+    #             st.session_state[f"rng_hi_{prod}"] = def_hi
+    #     
+    #     for prod in DEFAULT_RANGES:
+    #         st.markdown(f"<div style='color:{C['cyan']};font-size:0.82rem;font-weight:600;margin-top:6px;'>{prod}</div>", unsafe_allow_html=True)
+    #         col_lo, col_hi = st.columns(2)
+    #         with col_lo:
+    #             st.number_input("Mín", min_value=0.0, max_value=20.0, step=0.1, key=f"rng_lo_{prod}", label_visibility="collapsed")
+    #             st.caption("Mínimo")
+    #         with col_hi:
+    #             st.number_input("Máx", min_value=0.0, max_value=20.0, step=0.1, key=f"rng_hi_{prod}", label_visibility="collapsed")
+    #             st.caption("Máximo")
+    #     
+    #     col_btn1, col_btn2 = st.columns(2)
+    #     with col_btn1:
+    #         st.button("✅ Aplicar", use_container_width=True, key="btn_apply_ranges")
+    #     with col_btn2:
+    #         if st.button("🔄 Restaurar", use_container_width=True, key="btn_reset_ranges"):
+    #             for prod, (def_lo, def_hi) in DEFAULT_RANGES.items():
+    #                 st.session_state[f"rng_lo_{prod}"] = def_lo
+    #                 st.session_state[f"rng_hi_{prod}"] = def_hi
+    #             st.rerun()
+    # 
     # Build user_ranges directly from widget session_state keys (always current)
-    user_ranges = {}
-    for prod in DEFAULT_RANGES:
-        lo = st.session_state.get(f"rng_lo_{prod}", DEFAULT_RANGES[prod][0])
-        hi = st.session_state.get(f"rng_hi_{prod}", DEFAULT_RANGES[prod][1])
-        user_ranges[prod] = (lo, hi)
+    user_ranges = DEFAULT_RANGES # Use defaults since filters are disabled
+    # for prod in DEFAULT_RANGES:
+    #     lo = st.session_state.get(f"rng_lo_{prod}", DEFAULT_RANGES[prod][0])
+    #     hi = st.session_state.get(f"rng_hi_{prod}", DEFAULT_RANGES[prod][1])
+    #     user_ranges[prod] = (lo, hi)
     st.markdown("---")
 
 # Apply date filter
@@ -684,24 +680,53 @@ with tab2:
 # ═══════════════ TAB 3: MERCADOS ════════════════════════════
 with tab3:
     st.markdown('<div class="section-title">Mercados de Destino</div>', unsafe_allow_html=True)
-    st.markdown('<div class="card-container"><b style="color:white;">PERU FROST — Distribución por País</b>', unsafe_allow_html=True)
-    pf_country = df_pf.groupby('Pais de Destino').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False)
-    pf_country['TM'] = pf_country['Kg Neto']/1000
-    pf_country['USD_TM'] = (pf_country['U$ FOB Tot']/pf_country['Kg Neto']*1000).fillna(0)
-    pf_country['%FOB'] = pf_country['U$ FOB Tot']/pf_country['U$ FOB Tot'].sum()*100
+    st.markdown('<div class="card-container"><b style="color:white;">PERU FROST — Distribución por País y Participación de Mercado</b>', unsafe_allow_html=True)
+    
+    # 1. Market totals per country
+    mkt_country_total = df.groupby('Pais de Destino').agg({'U$ FOB Tot':'sum', 'Kg Neto':'sum'}).rename(columns={'U$ FOB Tot':'MKT_FOB', 'Kg Neto':'MKT_KG'})
+    
+    # 2. Peru Frost totals per country
+    pf_country_all = df_pf.groupby('Pais de Destino').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).sort_values('U$ FOB Tot', ascending=False)
+    pf_country_all['TM'] = pf_country_all['Kg Neto']/1000
+    pf_country_all['USD_TM'] = (pf_country_all['U$ FOB Tot']/pf_country_all['Kg Neto']*1000).fillna(0)
+    
+    # 3. Calculate Participation (%) = (PF_FOB / MKT_FOB) * 100
+    pf_country_all = pf_country_all.merge(mkt_country_total[['MKT_FOB']], left_index=True, right_index=True, how='left')
+    pf_country_all['%PARTICIPACION'] = (pf_country_all['U$ FOB Tot'] / pf_country_all['MKT_FOB'] * 100).fillna(0)
+    # Also calculate internal distribution for reference in a separate column if needed, but we'll use %PARTICIPACION as requested
+    
     col_ch, col_tb = st.columns([1,1])
     with col_ch:
-        top_c = pf_country.head(8).reset_index()
+        top_c = pf_country_all.head(8).reset_index()
         fig_c = px.bar(top_c, y='Pais de Destino', x='U$ FOB Tot', orientation='h', color_discrete_sequence=[C['cyan']])
         fig_c.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
             showlegend=False, margin=dict(l=0,r=0,t=10,b=0), height=300, xaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), yaxis=dict(autorange='reversed'))
         st.plotly_chart(fig_c, use_container_width=True)
     with col_tb:
         rows_c = ""
-        for pais, row in pf_country.iterrows():
-            rows_c += f"<tr><td>{pais}</td><td style='color:{C['cyan']};font-weight:700;'>{fmt_usd(row['U$ FOB Tot'])}</td><td>{row['TM']:,.1f} TM</td><td style='font-weight:700;'>${row['USD_TM']:,.0f}</td><td style='color:{C['green']};font-weight:600;'>{row['%FOB']:.2f}%</td></tr>"
-        st.markdown(f'<table class="styled"><tr><th>País</th><th style="color:{C["cyan"]}">FOB</th><th>TM</th><th>USD/TM</th><th>% FOB</th></tr>{rows_c}</table>', unsafe_allow_html=True)
+        for pais, row in pf_country_all.iterrows():
+            rows_c += f"<tr><td>{pais}</td><td style='color:{C['cyan']};font-weight:700;'>{fmt_usd(row['U$ FOB Tot'])}</td><td>{row['TM']:,.1f} TM</td><td style='font-weight:700;'>${row['USD_TM']:,.0f}</td><td style='color:{C['green']};font-weight:600;'>{row['%PARTICIPACION']:.2f}%</td></tr>"
+        st.markdown(f'<table class="styled"><tr><th>País</th><th style="color:{C["cyan"]}">FOB PF</th><th>TM PF</th><th>USD/TM PF</th><th>% Participación</th></tr>{rows_c}</table>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
+    # Bloques dinámicos al final
+    pf_country_blocks = pf_country_all[pf_country_all['%PARTICIPACION'] > 0].copy()
+    n_blocks = len(pf_country_blocks)
+    if n_blocks > 0:
+        st.markdown('<div style="margin-top:30px;"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Participación de Mercado por País (Bloques)</div>', unsafe_allow_html=True)
+        # Todos en la misma fila como solicitado
+        cols_b = st.columns(n_blocks)
+        for i, (pais, row) in enumerate(pf_country_blocks.iterrows()):
+            with cols_b[i]:
+                st.markdown(f"""
+                    <div class="part-card" style="margin-bottom:16px; border-top: 3px solid {C['cyan']}; padding: 15px 10px;">
+                        <div style="color:{C['white']}; font-weight:700; font-size:0.75rem; min-height:35px; display:flex; align-items:center; justify-content:center; text-transform:uppercase;">{pais}</div>
+                        <div class="part-pct" style="color:{C['cyan']}; font-size:1.4rem; margin: 8px 0 2px;">{row['%PARTICIPACION']:.1f}%</div>
+                        <div style="color:{C['text']}; font-weight:600; font-size:0.8rem;">{fmt_usd(row['U$ FOB Tot'])}</div>
+                        <div class="part-sub" style="font-size:0.65rem; margin-top:4px;">PF en MKT Total</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
     # Market comparison
     st.markdown('<div class="card-container"><b style="color:white;">Perú Total vs PERU FROST — Destinos de Exportación</b>', unsafe_allow_html=True)
@@ -715,23 +740,6 @@ with tab3:
         legend=dict(orientation='h', y=-0.15), margin=dict(l=0,r=0,t=10,b=40), height=350, yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'))
     st.plotly_chart(fig_comp, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="section-title">Participación de Mercado por País (Top 4 PF)</div>', unsafe_allow_html=True)
-    top4_pf = pf_country_comp.sort_values('U$ FOB Tot', ascending=False).head(4)
-    market_parts = []
-    colors_4 = [C['cyan'], C['green'], C['blue'], C['orange']]
-    for i, row in enumerate(top4_pf.iterrows()):
-        pais = row[1]['Pais de Destino']
-        pf_fob_pais = row[1]['U$ FOB Tot']
-        total_fob_pais = df[df['Pais de Destino']==pais]['U$ FOB Tot'].sum()
-        pct = (pf_fob_pais / total_fob_pais * 100) if total_fob_pais > 0 else 0
-        market_parts.append((f"{pais} (FOB)", pct, fmt_usd(pf_fob_pais), colors_4[i % 4]))
-    
-    if len(market_parts) > 0:
-        cols_m = st.columns(len(market_parts))
-        for i, (label, pct, sub, color) in enumerate(market_parts):
-            cols_m[i].markdown(f"""<div class="part-card"><div style="color:{C['muted']};font-weight:600;font-size:0.85rem;text-transform:uppercase;">{label}</div>
-            <div class="part-pct" style="color:{color};">{pct:.2f}%</div><div class="part-sub">PF: {sub}</div></div>""", unsafe_allow_html=True)
 
 # ═══════════════ TAB 4: RANKINGS TOP 15 ═════════════════════
 with tab4:
@@ -1160,6 +1168,15 @@ with tab8:
         rows_cxc = ""
         for _, r in df_cxc.iterrows():
             dias = r['Dias_Atrasados']
+            doc_id = str(r['N_Doc']).strip()
+            
+            # Custom highlights based on ID
+            row_style = ""
+            if doc_id == "1200000199":
+                row_style = f'style="background-color: {C["yellow"]}33; border-left: 5px solid {C["yellow"]};"'
+            elif doc_id == "1100015436":
+                row_style = f'style="background-color: {C["red"]}33; border-left: 5px solid {C["red"]};"'
+            
             if pd.isna(dias):
                 dias = 0
             if dias > 45:
@@ -1168,7 +1185,8 @@ with tab8:
                 sem = f'<span style="color:{C["yellow"]}">⚡ Atención</span>'
             else:
                 sem = f'<span class="badge badge-green">✅ OK</span>'
-            rows_cxc += f'<tr><td>{r["Cliente"][:40]}</td><td>{r["N_Doc"]}</td><td style="color:{C["cyan"]};font-weight:700;">{fmt_usd(r["Deuda_Pendiente"])}</td><td style="font-weight:600;">{dias:.0f} días</td><td>{sem}</td></tr>'
+                
+            rows_cxc += f'<tr {row_style}><td>{r["Cliente"][:40]}</td><td>{doc_id}</td><td style="color:{C["cyan"]};font-weight:700;">{fmt_usd(r["Deuda_Pendiente"])}</td><td style="font-weight:600;">{dias:.0f} días</td><td>{sem}</td></tr>'
         st.markdown(f'<table class="styled"><tr><th>Nombre de cliente</th><th>Nº documento</th><th style="color:{C["cyan"]}">Deuda pendiente</th><th>DÍAS ATRASADOS</th><th>Estado</th></tr>{rows_cxc}</table>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
