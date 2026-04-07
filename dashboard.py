@@ -160,21 +160,42 @@ def load_data():
     v_files = []
     for d in dirs_to_check:
         if os.path.exists(d):
-            v_files.extend([os.path.join(d, f) for f in os.listdir(d) if f.lower().startswith("veritrade") and f.lower().endswith(".xlsx")])
+            # Buscar archivos que CONTENGAN "veritrade" en el nombre (más flexible que startswith)
+            for f in os.listdir(d):
+                if "veritrade" in f.lower() and f.lower().endswith(".xlsx") and not f.startswith("~$"):
+                    v_files.append(os.path.join(d, f))
+                    
     if not v_files: return pd.DataFrame()
     path = max(v_files, key=os.path.getmtime)
         
-    df = pd.read_excel(path, sheet_name='Veritrade', header=5)
-    df['Fecha'] = pd.to_datetime(df['Fecha'])
-    df['FOB_KG'] = df['U$ FOB Tot'] / df['Kg Neto']
+    try:
+        # Intentar cargar hoja 'Veritrade'
+        df = pd.read_excel(path, sheet_name='Veritrade', header=5)
+    except Exception:
+        # Fallback a la primera hoja si 'Veritrade' no existe
+        df = pd.read_excel(path, sheet_name=0, header=5)
+        
+    # ── Limpieza y Filtrado de Filas Fantasmas ──
+    df.columns = [str(c).strip() for c in df.columns]
+    if 'Fecha' in df.columns:
+        df = df[df['Fecha'].notna()]
+    
+    df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
+    df = df[df['Fecha'].notna()]
+    
+    # Asegurar tipos numéricos para evitar errores de cálculo
+    for col in ['U$ FOB Tot', 'Kg Neto', 'Partida Aduanera']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+    df['FOB_KG'] = df['U$ FOB Tot'] / (df['Kg Neto'].replace(0, 1))
     df['USD_TM'] = df['FOB_KG'] * 1000
     df['TM'] = df['Kg Neto'] / 1000
     df['MES'] = df['Fecha'].dt.to_period('M')
     df['PARTIDA_TIPO'] = df['Partida Aduanera'].map({307430000:'FRESCO', 1605540000:'COCIDO'})
+    
     return df
-
-df_raw = load_data()
-
+        
 @st.cache_data
 def load_rentabilidad():
     base_dir = os.path.dirname(__file__)
@@ -188,40 +209,80 @@ def load_rentabilidad():
         
     try:
         wb = openpyxl.load_workbook(path, data_only=True)
-        sheet_name = [s for s in wb.sheetnames if 'resumen' in s.lower()]
-        if not sheet_name: return pd.DataFrame(), f"Sheet 'Resumen' missing. Found: {wb.sheetnames}"
-        ws = wb[sheet_name[0]]
+        sheet_name_list = [s for s in wb.sheetnames if 'resumen' in s.lower()]
+        ws = wb[sheet_name_list[0]] if sheet_name_list else (wb['Resumen'] if 'Resumen' in wb.sheetnames else None)
+        if not ws: return pd.DataFrame(), f"Sheet 'Resumen' missing. Found: {wb.sheetnames}"
+        
+        # 1. Mapeo Dinámico de Columnas (Fila 3) - Normalizado
         headers = {}
-        for c in range(1, ws.max_column+1):
+        import re, unicodedata
+        for c in range(1, ws.max_column + 1):
             v = ws.cell(3, c).value
-            if v: headers[c] = re.sub(r'\s+', ' ', str(v)).strip()
+            if v:
+                clean_v = re.sub(r'\s+', ' ', str(v).upper()).strip()
+                clean_v = "".join(ch for ch in unicodedata.normalize('NFKD', clean_v) if not unicodedata.combining(ch))
+                headers[c] = clean_v
+        
+        # Mapa de búsqueda (Lo que buscamos en el Excel -> El nombre que usaremos en el DataFrame)
+        target_map = {
+            'FECHA EMBARQUE': 'Fecha Embarque',
+            'CANTIDAD': 'Cantidad',
+            'PRODUCTO': 'Producto',
+            'CLIENTE (RAZON SOCIAL)': 'Cliente',
+            'VALOR CFR': 'VALOR CFR',
+            'UTILIDAD NETA': 'UTILIDAD NETA',
+            'UTILIDAD BRUTA': 'UTILIDAD BRUTA',
+            'PRECIO TM': 'Precio TM',
+            'VALOR FOB': 'VALOR FOB',
+            'COSTO UNITARIO': 'COSTO UNITARIO'
+        }
+        
+        final_col_map = {} # {Nombre_DF: c_idx}
+        for target_excel, target_df in target_map.items():
+            for c_idx, h_text in headers.items():
+                if target_excel == h_text: # Prioridad Exacto
+                    final_col_map[target_df] = c_idx
+                    break
+                elif target_excel in h_text and target_df not in final_col_map: # Parcial (solo si no hay exacto)
+                    final_col_map[target_df] = c_idx
+        
+        # Validar mínimos
+        if 'Producto' not in final_col_map or 'Cliente' not in final_col_map:
+            return pd.DataFrame(), f"Columnas críticas (Producto/Cliente) no encontradas en {path}. Mapa: {final_col_map}"
+
         rows = []
-        for r in range(4, ws.max_row+1):
-            row = {}
-            for c, h in headers.items():
-                row[h] = ws.cell(r, c).value
-            # Make it case insensitive for header dict
-            prod_val = next((v for k, v in row.items() if 'PRODUCTO' in str(k).upper()), None)
-            if prod_val: rows.append(row)
+        for r in range(4, ws.max_row + 1):
+            p_val = ws.cell(r, final_col_map['Producto']).value
+            if not p_val or str(p_val).strip() == '' or 'TOTAL' in str(p_val).upper():
+                continue
+            
+            # Solo si hay algo de cantidad o utilidad para evitar filas fantasmas
+            qty_val = ws.cell(r, final_col_map.get('Cantidad', 1)).value
+            if qty_val is None: continue
+
+            row_data = {}
+            for target_df, c_idx in final_col_map.items():
+                row_data[target_df] = ws.cell(r, c_idx).value
+            rows.append(row_data)
+            
         wb.close()
         df = pd.DataFrame(rows)
-        # Fix columns mapped...
-        return df, f"Success OK: {len(df)} rows found. Headers: {list(headers.values())[:5]}"
-    except Exception as e:
-        return pd.DataFrame(), f"Error processing {path}: {str(e)}"
-    for col in ['Cantidad','Precio TM','FOB / TM','VALOR FOB','VALOR CFR','Costo Flete',
-                'COSTO UNITARIO','Materia Prima','MOD','CIF','COSTO VENTAS',
-                'UTILIDAD BRUTA','MARGEN BRUTO','UTILIDAD OPERATIVA','MARGEN OPERATIVO',
-                'UTILIDAD NETA','MARGEN NETO','EBITDA','MARGEN EBITDA','DRAWBACK',
-                'GASTO VENTAS','GASTO ADM','GASTO FINANCIERO','DEPRECIACIÓN']:
-        # Rename standard columns if uppercase matches
-        for c in df.columns.tolist():
-            if str(c).upper().strip() == col.upper():
-                df.rename(columns={c: col}, inplace=True)
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce')
         
-    if 'Fecha Embarque' in df.columns:
-        df['Fecha Embarque'] = pd.to_datetime(df['Fecha Embarque'], errors='coerce')
+        if not df.empty:
+            # Tipado Numérico
+            num_cols = ['Cantidad', 'VALOR CFR', 'UTILIDAD NETA', 'UTILIDAD BRUTA', 'Precio TM', 'VALOR FOB', 'COSTO UNITARIO']
+            for col in num_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+            if 'Fecha Embarque' in df.columns:
+                df['Fecha Embarque'] = pd.to_datetime(df['Fecha Embarque'], errors='coerce')
+            
+        return df, f"OK: {len(df)} filas útiles cargadas de Resumen"
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame(), f"Error processing {path}: {str(e)}"
 
     return df, "Filtered columns applied"
 
@@ -285,10 +346,16 @@ def load_inventario():
     
         all_months[sheet_name] = df_month
     
-    # Target common sheet names (ignore case and spaces)
-    target_sheets = ['marzo2026', 'abril2026', 'mayo2026', 'junio2026', 'febrero2026', 'enero2026']
+    # Target common sheet names en orden de prioridad (mes más reciente primero)
+    target_sheets = [
+        'abril2026', 'abril', 
+        'marzo2026', 'marzo', 
+        'febrero2026', 'febrero', 
+        'enero2026', 'enero',
+        'mayo2026', 'junio2026'
+    ]
     latest_key = None
-    all_months_clean = {k.lower().replace(" ", ""): k for k in all_months.keys()}
+    all_months_clean = {k.lower().strip().replace(" ", ""): k for k in all_months.keys()}
     
     for ts in target_sheets:
         if ts in all_months_clean:
@@ -377,61 +444,62 @@ def load_cxc():
     return df.sort_values(['Cliente', 'Deuda_Pendiente'], ascending=[True, False])
 
 @st.cache_data
-def load_td_tables():
-    """Load product and client profitability tables from TD sheet"""
-    base_dir = os.path.dirname(__file__)
-    dirs_to_check = [os.path.join(base_dir, "INPUT"), base_dir]
-    r_files = []
-    for d in dirs_to_check:
-        if os.path.exists(d):
-            r_files.extend([os.path.join(d, f) for f in os.listdir(d) if f.lower().startswith("rentabilidad") and f.lower().endswith(".xlsx")])
-    if not r_files: return pd.DataFrame(), pd.DataFrame()
-    path = max(r_files, key=os.path.getmtime)
-    wb = openpyxl.load_workbook(path, data_only=True)
-    ws = wb['TD']
+def get_manual_summary(df, group_col):
+    if df.empty: 
+        return pd.DataFrame()
     
-    # Product table: H28=headers, H29:M39=data, H40=total
-    prod_rows = []
-    for r in range(29, 40):
-        name = ws.cell(r, 8).value  # H = col 8
-        if not name or 'Total' in str(name): continue
-        prod_rows.append({
-            'Producto_TD': str(name).strip(),
-            'Util_Ene': ws.cell(r, 9).value or 0,   # I
-            'Util_Feb': ws.cell(r, 10).value or 0,  # J
-            'Util_Mar': ws.cell(r, 11).value or 0,  # K
-            'Util_Total': ws.cell(r, 12).value or 0, # L
-            'MG_Neto': ws.cell(r, 13).value or 0,   # M
-        })
-    df_td_prod = pd.DataFrame(prod_rows)
-    for c in ['Util_Ene','Util_Feb','Util_Mar','Util_Total','MG_Neto']:
-        if c in df_td_prod.columns: df_td_prod[c] = pd.to_numeric(df_td_prod[c], errors='coerce').fillna(0)
+    # 1. Agrupar totales (Cantidad, Valor CFR, Utilidad Total)
+    grouped = df.groupby(group_col).agg({
+        'Cantidad': 'sum',
+        'VALOR CFR': 'sum',
+        'UTILIDAD NETA': 'sum'
+    }).reset_index()
     
-    # Client table: H50=headers, H51:M67=data, H68=total
-    cli_rows = []
-    for r in range(51, 68):
-        name = ws.cell(r, 8).value  # H
-        if not name or 'Total' in str(name): continue
-        cli_rows.append({
-            'Cliente_TD': str(name).strip(),
-            'Util_Ene': ws.cell(r, 9).value or 0,
-            'Util_Feb': ws.cell(r, 10).value or 0,
-            'Util_Mar': ws.cell(r, 11).value or 0,
-            'Util_Total': ws.cell(r, 12).value or 0,
-            'MG_Neto': ws.cell(r, 13).value or 0,
-        })
-    df_td_cli = pd.DataFrame(cli_rows)
-    for c in ['Util_Ene','Util_Feb','Util_Mar','Util_Total','MG_Neto']:
-        if c in df_td_cli.columns: df_td_cli[c] = pd.to_numeric(df_td_cli[c], errors='coerce').fillna(0)
+    # 2. Calcular Utilidad Mensual (Ene, Feb, Mar)
+    if 'Fecha Embarque' in df.columns:
+        df_copy = df.copy()
+        df_copy['Mes'] = df_copy['Fecha Embarque'].dt.month
+        
+        for m_idx, m_name in [(1, 'Util_Ene'), (2, 'Util_Feb'), (3, 'Util_Mar')]:
+            # Sumar UTILIDAD NETA por mes
+            m_sum = df_copy[df_copy['Mes'] == m_idx].groupby(group_col)['UTILIDAD NETA'].sum().reset_index()
+            m_sum.columns = [group_col, m_name]
+            grouped = grouped.merge(m_sum, on=group_col, how='left')
     
-    wb.close()
-    return df_td_prod, df_td_cli
+    grouped.fillna(0, inplace=True)
+    
+    # Asegurar que existan columnas mensuales aunque no haya datos
+    for m in ['Util_Ene', 'Util_Feb', 'Util_Mar']:
+        if m not in grouped.columns:
+            grouped[m] = 0.0
+
+    # 3. Calcular Margen Neto Ponderado (Total Utilidad / Total CFR)
+    grouped['MG_Neto'] = (grouped['UTILIDAD NETA'] / (grouped['VALOR CFR'].replace(0, 1)) * 100).fillna(0)
+    
+    # 4. Renombrar columnas para compatibilidad con el resto del dashboard
+    grouped.rename(columns={
+        'UTILIDAD NETA': 'Util_Neta',
+        'Cantidad': 'TM_Vendidas',
+        'VALOR CFR': 'Venta_CFR'
+    }, inplace=True)
+    # Crear alias para evitar errores de referencia
+    grouped['Util_Total'] = grouped['Util_Neta']
+    
+    if group_col == 'Producto':
+        grouped.rename(columns={'Producto': 'Producto_TD'}, inplace=True)
+    elif group_col == 'Cliente':
+        grouped.rename(columns={'Cliente': 'Cliente_TD'}, inplace=True)
+        
+    return grouped
 
 df_raw = load_data()
 df_rent, dbg_rent = load_rentabilidad()
 inv_months, df_inv = load_inventario()
 df_cxc = load_cxc()
-df_td_prod, df_td_cli = load_td_tables()
+
+# Generar tablas de rentabilidad de manera manual desde el Excel Resumen
+df_td_prod = get_manual_summary(df_rent, 'Producto')
+df_td_cli = get_manual_summary(df_rent, 'Cliente')
 
 # Debug info on sidebar to diagnose Streamlit Cloud
 with st.sidebar:
@@ -459,7 +527,8 @@ def apply_fob_filter(df, ranges=None):
         ranges = DEFAULT_RANGES
     mask = (df['PRODUCTO'].isna()) | (df['PRODUCTO']=='')
     for prod, (lo, hi) in ranges.items():
-        mask = mask | ((df['PRODUCTO']==prod) & (df['FOB_KG']>=lo) & (df['FOB_KG']<=hi))
+        # Se comenta el filtro superior (<=hi) a pedido del usuario, dejando solo el inferior
+        mask = mask | ((df['PRODUCTO']==prod) & (df['FOB_KG']>=lo)) # & (df['FOB_KG']<=hi))
     return df[mask]
 
 def is_pf(name):
@@ -472,6 +541,12 @@ def fmt_pct(v): return f"{v:.2f}%" if pd.notna(v) else "—"
 # ── Sidebar ──────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(f"<div style='color:{C['cyan']};font-weight:800;font-size:1.1rem;margin-bottom:16px;'>⚙️ FILTROS</div>", unsafe_allow_html=True)
+    if df_raw.empty:
+        base_dir = os.path.dirname(__file__)
+        dirs_scanned = [os.path.join(base_dir, "INPUT"), base_dir]
+        st.error(f"❌ No se encontraron archivos que contengan 'Veritrade' en: {dirs_scanned}")
+        st.stop()
+
     min_date = df_raw['Fecha'].min().date()
     max_date = df_raw['Fecha'].max().date()
 
@@ -1066,41 +1141,17 @@ with tab7:
 with tab8:
     st.markdown('<div class="section-title">Análisis de Clientes — PERU FROST</div>', unsafe_allow_html=True)
 
-    # ── Rentabilidad por Cliente (directly from TD + Resumen) ──
-    if len(df_td_cli) > 0 and len(df_rent) > 0:
-        rent_filter = df_rent  # No se aplica filtro de fechas global por petición del usuario para respetar los consolidados
-
-        # Use Resumen data for TM and CFR, TD data for Utilidad and Margen
-        rent_cli = rent_filter[rent_filter['Cliente (Razón Social)'] != 'Cliente (Razón Social)'].groupby('Cliente (Razón Social)').agg({
-            'Cantidad':'sum', 'VALOR CFR':'sum'
-        }).reset_index()
-        rent_cli.columns = ['Cliente','TM_Vendidas','Venta_CFR']
-
-        # Build final table using TD as source of truth for Utilidad/Margen
-        # Match by exact name (Resumen and TD have same client names)
-        final_clients = []
-        for _, td_row in df_td_cli.iterrows():
-            td_name = str(td_row['Cliente_TD']).strip()
-            # Find matching Resumen row using column M (Cliente (Razón Social))
-            match = df_rent[df_rent['Cliente (Razón Social)'].str.strip().str.upper() == td_name.upper()]
-            tm = match['Cantidad'].sum() if len(match) > 0 else 0
-            cfr = match['VALOR CFR'].sum() if len(match) > 0 else 0
-            mg_raw = td_row['MG_Neto']
-            mg = mg_raw * 100 if abs(mg_raw) < 2 else mg_raw
-            final_clients.append({
-                'Cliente': td_name,
-                'TM_Vendidas': tm,
-                'Venta_CFR': cfr,
-                'Util_Ene': td_row['Util_Ene'],
-                'Util_Feb': td_row['Util_Feb'],
-                'Util_Mar': td_row['Util_Mar'],
-                'Util_Neta': td_row['Util_Total'],
-                'MG_Neto': mg,
-            })
-        df_final_cli = pd.DataFrame(final_clients)
+    # ── Rentabilidad por Cliente (Manual from Resumen) ──
+    if len(df_td_cli) > 0:
+        # Usamos df_td_cli que ya tiene todo el agregado manual
+        df_final_cli = df_td_cli.copy()
+        df_final_cli.rename(columns={'Cliente_TD': 'Cliente'}, inplace=True)
+        
         total_cfr_cli = df_final_cli['Venta_CFR'].sum()
-        total_util_cli = df_final_cli['Util_Neta'].sum()
+        total_util_cli = df_final_cli['Util_Total'].sum()
         total_mg_cli = (total_util_cli / total_cfr_cli * 100) if total_cfr_cli > 0 else 0
+        n_cli = len(df_final_cli)
+        n_rentable = len(df_final_cli[df_final_cli['Util_Total'] > 0])
         n_cli = len(df_final_cli)
         n_rentable = len(df_final_cli[df_final_cli['Util_Neta'] > 0])
 
@@ -1249,32 +1300,9 @@ with tab10:
             <div class="kpi-card c4"><div class="kpi-label">MARGEN NETO</div><div class="kpi-value">{total_mg_neto:.1f}%</div><div class="kpi-sub">{'🟢' if total_mg_neto > 0 else '🔴'} Ponderado</div></div>
         </div>""", unsafe_allow_html=True)
 
-        # ── Use TD data directly for product profitability ──
-        # Group exactly by 'Producto' column from Resumen
-        rent_by_prod = rent_filter[rent_filter['Producto'].notna()].groupby('Producto').agg({
-            'Cantidad': 'sum', 'VALOR CFR': 'sum'
-        }).reset_index()
-        rent_by_prod.columns = ['Producto', 'TM_Vendidas', 'Venta_CFR']
-        rent_by_prod['Producto_UP'] = rent_by_prod['Producto'].astype(str).str.strip().str.upper()
-
-        # Build final product list from TD (source of truth)
-        final_prods = []
-        for _, tdr in df_td_prod.iterrows():
-            td_name_display = str(tdr['Producto_TD']).strip()
-            td_name_up = td_name_display.upper()
-            
-            # Find matching product directly
-            match = rent_by_prod[rent_by_prod['Producto_UP'] == td_name_up]
-            tm = float(match['TM_Vendidas'].sum()) if len(match) > 0 else 0.0
-            cfr = float(match['Venta_CFR'].sum()) if len(match) > 0 else 0.0
-            mg_raw = tdr['MG_Neto']
-            mg = mg_raw * 100 if abs(mg_raw) < 2 else mg_raw
-            final_prods.append({
-                'Producto': td_name_display, 'TM_Vendidas': tm, 'Venta_CFR': cfr,
-                'Util_Ene': tdr['Util_Ene'], 'Util_Feb': tdr['Util_Feb'], 'Util_Mar': tdr['Util_Mar'],
-                'Util_Neta': tdr['Util_Total'], 'MG_Neto': mg,
-            })
-        df_final_prod = pd.DataFrame(final_prods)
+        # ── Usamos el agregado manual por producto ──
+        df_final_prod = df_td_prod.copy()
+        df_final_prod.rename(columns={'Producto_TD': 'Producto'}, inplace=True)
 
         # Table
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
@@ -1426,8 +1454,12 @@ with tab11:
         if len(df_rent) > 0:
             rent_p = df_rent[df_rent['Producto'].astype(str).str.contains(prod[:8], case=False, na=False)]
             if len(rent_p) > 0:
-                mg_val = rent_p['MARGEN BRUTO'].mean()
-                mg_pct = mg_val*100 if pd.notna(mg_val) and abs(mg_val)<1 else (mg_val if pd.notna(mg_val) else 0)
+                util_sum = rent_p['UTILIDAD NETA'].sum()
+                cfr_sum = rent_p['VALOR CFR'].sum()
+                if cfr_sum > 0:
+                    mg_pct = (util_sum / cfr_sum) * 100
+                else:
+                    mg_pct = 0
                 mg_color = C['green'] if mg_pct > 0 else C['red']
                 mg_str = f'<span style="color:{mg_color};font-weight:700;">{mg_pct:.1f}%</span>'
                 
