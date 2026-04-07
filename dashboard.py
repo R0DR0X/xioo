@@ -325,7 +325,8 @@ def load_inventario():
         rows = []
         for r in range(3, ws.max_row + 1):
             mat = ws.cell(r, 3).value  # C = MATERIAL
-            if not mat or str(mat).strip() == '' or 'TOTAL' in str(mat).upper():
+            mat_str = str(mat).strip().upper()
+            if not mat or mat_str == '' or 'TOTAL' in mat_str or mat_str.startswith('STOCK') or 'STOCK A ' in mat_str:
                 continue
             rows.append({
                 'CODIGO_SAP': ws.cell(r, 2).value,  # B
