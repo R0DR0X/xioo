@@ -59,7 +59,7 @@ C = dict(
     bg="#0a1628", card="#0f1f38", card2="#162a4a", border="#1e3a5f",
     text="#e0e7ef", muted="#7a8da6", white="#ffffff",
     cyan="#00d4aa", green="#22c55e", yellow="#f59e0b", orange="#f97316",
-    red="#ef4444", blue="#3b82f6", purple="#a855f7",
+    red="#ef4444", blue="#3b82f6", purple="#a855f7", gray="#7a8da6",
     pf_cyan="#00d4aa", pf_gold="#f59e0b",
     grad1="#0a1628", grad2="#132240",
 )
@@ -126,12 +126,12 @@ st.markdown(f"""<style>
     .header-title {{ color: {C['white']}; font-size: 2.2rem; font-weight: 900; margin: 4px 0; }}
     .header-sub {{ color: {C['muted']}; font-size: 0.9rem; }}
     .pf-highlight {{ background: {C['cyan']}15; border-left: 3px solid {C['cyan']}; }}
-    table.styled {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
-    table.styled th {{ color: {C['muted']}; text-align: left; padding: 10px 12px; border-bottom: 1px solid {C['border']}; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }}
-    table.styled td {{ color: {C['text']}; padding: 10px 12px; border-bottom: 1px solid {C['border']}22; }}
+    table.styled {{ width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 0.85rem; }}
+    table.styled th {{ color: {C['muted']}; text-align: left; padding: 8px 12px; border-bottom: 1px solid {C['border']}; font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; }}
+    table.styled td {{ color: {C['text']}; padding: 8px 12px; border-bottom: 1px solid {C['border']}11; }}
     table.styled tr.pf {{ background: {C['cyan']}10; border-left: 3px solid {C['cyan']}; }}
     table.styled tr.pf td {{ color: {C['cyan']}; font-weight: 600; }}
-    table.styled tr.top1 td:first-child {{ }}
+    .critical-row {{ background: rgba(239, 68, 68, 0.08) !important; border-left: 3px solid {C['red']} !important; }}
     .badge {{ display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }}
     .badge-green {{ background: {C['green']}22; color: {C['green']}; }}
     .badge-red {{ background: {C['red']}22; color: {C['red']}; }}
@@ -150,6 +150,26 @@ st.markdown(f"""<style>
     .part-card {{ background: {C['card']}; border: 1px solid {C['border']}; border-radius: 12px; padding: 24px; text-align: center; }}
     .part-pct {{ font-size: 2rem; font-weight: 800; margin: 12px 0 4px; }}
     .part-sub {{ color: {C['muted']}; font-size: 0.78rem; }}
+    
+    /* Accordion Table CSS */
+    .cxc-accordion {{ width: 100%; margin-top: 10px; }}
+    .cxc-item {{ margin-bottom: 4px; border-radius: 6px; overflow: hidden; background: rgba(255,255,255,0.02); border: 1px solid {C['border']}44; }}
+    .cxc-header {{ display: flex; align-items: center; padding: 12px 16px; cursor: pointer; transition: background 0.3s; user-select: none; }}
+    .cxc-header:hover {{ background: rgba(255,255,255,0.05); }}
+    .cxc-header .chevron {{ font-size: 0.8rem; color: {C['muted']}; transition: transform 0.3s; margin-right: 15px; }}
+    .cxc-toggle {{ display: none; }}
+    .cxc-toggle:checked ~ .cxc-header .chevron {{ transform: rotate(90deg); }}
+    .cxc-toggle:checked ~ .cxc-content {{ display: block; }}
+    .cxc-content {{ display: none; padding: 0 16px 12px 42px; background: rgba(0,0,0,0.1); border-top: 1px solid {C['border']}22; }}
+    
+    .cxc-col-client {{ flex: 2; font-weight: 600; color: {C['white']}; }}
+    .cxc-col-info {{ flex: 1; text-align: right; color: {C['muted']}; font-size: 0.85rem; }}
+    .cxc-col-amount {{ flex: 1; text-align: right; color: {C['cyan']}; font-weight: 700; }}
+    .cxc-col-days {{ flex: 0.8; text-align: right; font-weight: 600; }}
+    
+    .cxc-invoice-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }}
+    .cxc-invoice-table th {{ text-align: left; color: {C['muted']}; font-size: 0.7rem; text-transform: uppercase; padding: 6px 0; border-bottom: 1px solid {C['border']}33; }}
+    .cxc-invoice-table td {{ padding: 8px 0; border-bottom: 1px solid {C['border']}11; }}
 </style>""", unsafe_allow_html=True)
 
 # ── Data Loading ─────────────────────────────────────────────
@@ -1215,32 +1235,101 @@ with tab8:
             <div class="info-card"><div class="info-label">FACTURAS PENDIENTES</div><div class="info-value">{len(cxc_positivo)}</div></div>
             <div class="info-card"><div class="info-label">DÍAS ATRASO PROM.</div><div class="info-value" style="color:{C['red'] if avg_dias > 30 else C['yellow']}">{avg_dias:.0f} días</div></div>
         </div>""", unsafe_allow_html=True)
-        st.markdown('<div class="card-container">', unsafe_allow_html=True)
-        st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">Detalle CxC — Exportación</b>', unsafe_allow_html=True)
-        rows_cxc = ""
-        for _, r in df_cxc.iterrows():
-            dias = r['Dias_Atrasados']
-            doc_id = str(r['N_Doc']).strip()
+
+        # ── Visualización Ranking de Deuda ──
+        cxc_agg = cxc_positivo.groupby('Cliente')['Deuda_Pendiente'].sum().reset_index().sort_values('Deuda_Pendiente', ascending=False).head(10)
+        if not cxc_agg.empty:
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><b style="color:{C["white"]}; font-size:1rem;">Ranking Top 10 — Deuda por Cliente</b><span style="color:{C["gray"]}; font-size:0.8rem;">USD</span></div>', unsafe_allow_html=True)
             
-            # Custom highlights based on ID
-            row_style = ""
-            if doc_id == "1200000199":
-                row_style = f'style="background-color: {C["yellow"]}33; border-left: 5px solid {C["yellow"]};"'
-            elif doc_id == "1100015436":
-                row_style = f'style="background-color: {C["red"]}33; border-left: 5px solid {C["red"]};"'
+            # En Plotly horizontal, para que el mayor esté ARRIBA, el dataframe debe estar en orden ASCENDENTE (el último es el más grande y queda arriba)
+            fig_cxc = px.bar(
+                cxc_agg.sort_values('Deuda_Pendiente', ascending=True), 
+                y='Cliente', 
+                x='Deuda_Pendiente', 
+                orientation='h',
+                color='Deuda_Pendiente',
+                color_continuous_scale='Reds',
+                text_auto='.2s'
+            )
+            fig_cxc.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)', 
+                plot_bgcolor='rgba(0,0,0,0)', 
+                font_color=C['text'],
+                showlegend=False,
+                coloraxis_showscale=False,
+                margin=dict(l=0,r=50,t=10,b=10), 
+                height=380,
+                xaxis=dict(gridcolor='rgba(255,255,255,0.05)', tickformat='$,.0f', title=None, zeroline=False),
+                yaxis=dict(title=None, tickfont=dict(size=12, color=C['white']))
+            )
+            fig_cxc.update_traces(
+                hovertemplate="<b>%{y}</b><br>Deuda: $%{x:,.2f}<extra></extra>",
+                textposition='outside',
+                textfont=dict(color=C['white'], size=11),
+                marker_line_color='rgba(0,0,0,0)',
+                marker_line_width=0
+            )
+            st.plotly_chart(fig_cxc, use_container_width=True, key="cxc_ranking_chart")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # ── Detalle de Facturas (Accordion Table Premium) ──
+        st.markdown(f'<div style="margin: 30px 0 15px 5px; border-left: 4px solid {C["cyan"]}; padding-left:15px;"><b style="color:{C["white"]}; font-size:1.2rem;">Detalle de Facturas por Cliente</b><br><small style="color:{C["gray"]};">Haga clic sobre un cliente para expandir sus facturas</small></div>', unsafe_allow_html=True)
+        
+        # Agrupamos por cliente
+        facturas_por_cliente = cxc_positivo.groupby('Cliente')
+        clientes_ordenados = cxc_positivo.groupby('Cliente')['Deuda_Pendiente'].sum().sort_values(ascending=False).index
+
+        accordion_html = '<div class="cxc-accordion">'
+        
+        # Encabezado de la "pseudo-tabla"
+        accordion_html += f'<div style="display:flex; padding: 10px 16px; font-size: 0.7rem; color:{C["muted"]}; text-transform:uppercase; font-weight:700; letter-spacing:1px;">'
+        accordion_html += '<div style="flex:2; padding-left:25px;">Cliente</div>'
+        accordion_html += '<div style="flex:1; text-align:right;">Nro Facturas</div>'
+        accordion_html += '<div style="flex:1; text-align:right;">Deuda Total</div>'
+        accordion_html += '<div style="flex:0.8; text-align:right;">Máx. Atraso</div>'
+        accordion_html += '</div>'
+
+        for i, cliente in enumerate(clientes_ordenados):
+            df_cli = facturas_por_cliente.get_group(cliente).sort_values('Dias_Atrasados', ascending=False)
+            deuda_total = df_cli['Deuda_Pendiente'].sum()
+            max_atraso = df_cli['Dias_Atrasados'].max()
+            n_facturas = len(df_cli)
             
-            if pd.isna(dias):
-                dias = 0
-            if dias > 45:
-                sem = f'<span class="badge badge-red">⚠️ Crítico</span>'
-            elif dias > 20:
-                sem = f'<span style="color:{C["yellow"]}">⚡ Atención</span>'
-            else:
-                sem = f'<span class="badge badge-green">✅ OK</span>'
-                
-            rows_cxc += f'<tr {row_style}><td>{r["Cliente"][:40]}</td><td>{doc_id}</td><td style="color:{C["cyan"]};font-weight:700;">{fmt_usd(r["Deuda_Pendiente"])}</td><td style="font-weight:600;">{dias:.0f} días</td><td>{sem}</td></tr>'
-        st.markdown(f'<table class="styled"><tr><th>Nombre de cliente</th><th>Nº documento</th><th style="color:{C["cyan"]}">Deuda pendiente</th><th>DÍAS ATRASADOS</th><th>Estado</th></tr>{rows_cxc}</table>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+            # Formateo de alerta de color
+            atraso_color = C['red'] if max_atraso > 30 else (C['yellow'] if max_atraso > 15 else C['text'])
+            item_id = f"cxc_item_{i}"
+            
+            # Filas de facturas dentro del acordeón
+            invoice_rows = ""
+            for _, r in df_cli.iterrows():
+                d_atraso = r['Dias_Atrasados']
+                row_style = f"background:rgba(239,68,68,0.05);" if d_atraso > 45 else ""
+                invoice_rows += f'<tr style="{row_style}">'
+                invoice_rows += f'<td style="color:{C["gray"]};">#{str(r["N_Doc"]).strip()}</td>'
+                invoice_rows += f'<td style="text-align:right; font-weight:600;">{fmt_usd(r["Deuda_Pendiente"])}</td>'
+                invoice_rows += f'<td style="text-align:right; color:{C["red"] if d_atraso > 30 else C["text"]};">{d_atraso:.0f} días</td>'
+                invoice_rows += '</tr>'
+
+            accordion_html += f'<div class="cxc-item">'
+            accordion_html += f'<input type="checkbox" id="{item_id}" class="cxc-toggle">'
+            accordion_html += f'<label class="cxc-header" for="{item_id}">'
+            accordion_html += f'<span class="chevron">▶</span>'
+            accordion_html += f'<div class="cxc-col-client">{cliente[:35]}</div>'
+            accordion_html += f'<div class="cxc-col-info">{n_facturas} fact.</div>'
+            accordion_html += f'<div class="cxc-col-amount">{fmt_usd(deuda_total)}</div>'
+            accordion_html += f'<div class="cxc-col-days" style="color:{atraso_color};">{max_atraso:.0f} días</div>'
+            accordion_html += f'</label>'
+            accordion_html += f'<div class="cxc-content">'
+            accordion_html += f'<table class="cxc-invoice-table">'
+            accordion_html += f'<thead><tr><th>Documento</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Atraso</th></tr></thead>'
+            accordion_html += f'<tbody>{invoice_rows}</tbody>'
+            accordion_html += f'</table></div></div>'
+            
+        accordion_html += '</div>'
+        st.markdown(accordion_html, unsafe_allow_html=True)
+
+
 
 # ═══════════════ TAB 9: INVENTARIO ══════════════════════════
 with tab9:
