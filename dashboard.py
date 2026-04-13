@@ -816,11 +816,11 @@ with tab3:
         for i, (pais, row) in enumerate(pf_country_blocks.iterrows()):
             with cols_b[i]:
                 st.markdown(f"""
-                    <div class="part-card" style="margin-bottom:16px; border-top: 3px solid {C['cyan']}; padding: 15px 10px;">
-                        <div style="color:{C['white']}; font-weight:700; font-size:0.75rem; min-height:35px; display:flex; align-items:center; justify-content:center; text-transform:uppercase;">{pais}</div>
+                    <div class="part-card" style="margin-bottom:16px; border-top: 3px solid {C['cyan']}; padding: 15px 10px; height: 100%; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div style="color:{C['white']}; font-weight:700; font-size:0.75rem; min-height:40px; display:flex; align-items:center; justify-content:center; text-transform:uppercase;">{pais}</div>
                         <div class="part-pct" style="color:{C['cyan']}; font-size:1.4rem; margin: 8px 0 2px;">{row['%PARTICIPACION']:.1f}%</div>
                         <div style="color:{C['text']}; font-weight:600; font-size:0.8rem;">{fmt_usd(row['U$ FOB Tot'])}</div>
-                        <div class="part-sub" style="font-size:0.65rem; margin-top:4px;">PF en MKT Total</div>
+                        <div class="part-sub" style="font-size:0.65rem; margin-top:4px;">PF en MTP Total</div>
                     </div>
                 """, unsafe_allow_html=True)
 
