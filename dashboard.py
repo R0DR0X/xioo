@@ -428,12 +428,13 @@ def load_cxc():
 
     rows = []
     for r in range(2, ws.max_row + 1):
-        unidad = ws.cell(r, cols.get('unidad', 11)).value
-        # Filter strict: Only EXPORTACIÓN and positive values (>0)
-        if not unidad or 'EXPORT' not in str(unidad).upper():
+        unidad_val = ws.cell(r, cols.get('unidad', 11)).value
+        unidad_str = str(unidad_val or '').upper()
+        if 'EXPORT' not in unidad_str:
             continue
+            
         usd_homol = ws.cell(r, cols.get('usd', 16)).value
-        if not usd_homol or float(usd_homol) <= 0:
+        if not usd_homol:
             continue
         
         nombre = ws.cell(r, cols.get('nombre', 2)).value
