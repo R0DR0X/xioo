@@ -440,18 +440,26 @@ def load_cxc():
         nombre = ws.cell(r, cols.get('nombre', 2)).value
         n_doc = ws.cell(r, cols.get('ndoc', 3)).value
         fecha_ideal = ws.cell(r, cols.get('fecha_ideal', 12)).value
-        dias_q = ws.cell(r, cols.get('dias', 17)).value
+        dias_excel = ws.cell(r, cols.get('dias', 17)).value
         
-        # Calculate dias dynamically if possible
-        dias = float(dias_q) if dias_q is not None else 0
-        try:
-            import datetime
-            if fecha_ideal and isinstance(fecha_ideal, datetime.datetime):
-                dias = (datetime.datetime.now() - fecha_ideal).days
-            elif fecha_ideal and isinstance(fecha_ideal, datetime.date):
-                dias = (datetime.date.today() - fecha_ideal).days
-        except Exception:
-            pass
+        # Dynamic calculation based on "Today"
+        dias = 0
+        if fecha_ideal:
+            try:
+                dt_ideal = pd.to_datetime(fecha_ideal)
+                if pd.notna(dt_ideal):
+                    # Relative to current system date (today)
+                    dias = (pd.Timestamp.now().normalize() - dt_ideal.normalize()).days
+                else:
+                    dias = float(dias_excel) if dias_excel is not None else 0
+            except:
+                dias = float(dias_excel) if dias_excel is not None else 0
+        else:
+            dias = float(dias_excel) if dias_excel is not None else 0
+
+        # Most accounting systems floor at 0 for documents not yet due
+        # but if user wants full dynamic, we keep it as is (could be negative)
+        # However, for the average, we will filter only > 0 later.
             
         if not nombre: continue
         rows.append({
@@ -1235,11 +1243,13 @@ with tab8:
         
         n_docs = len(df_cxc)
         avg_dias = facturas_vencidas['Dias_Atrasados'].mean() if len(facturas_vencidas) > 0 else 0
+        max_dias = df_cxc['Dias_Atrasados'].max() if len(df_cxc) > 0 else 0
         
         st.markdown(f"""<div class="info-row">
             <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div></div>
+            <div class="info-card"><div class="info-label">PROMEDIO ATRASO (DÍAS)</div><div class="info-value" style="color:{C['yellow']}">{avg_dias:.0f} días</div></div>
+            <div class="info-card"><div class="info-label">DÍAS MÁX. ATRASO</div><div class="info-value" style="color:{C['red']}">{max_dias:.0f} días</div></div>
             <div class="info-card"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div></div>
-            <div class="info-card"><div class="info-label">DÍAS ATRASO PROM.</div><div class="info-value" style="color:{C['red'] if avg_dias > 30 else C['yellow']}">{avg_dias:.0f} días</div></div>
         </div>""", unsafe_allow_html=True)
 
         # ── Visualización Ranking de Deuda ──
