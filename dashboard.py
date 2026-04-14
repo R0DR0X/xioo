@@ -1228,17 +1228,24 @@ with tab8:
     # ── CxC section (independent invoices) ──
     if len(df_cxc) > 0:
         st.markdown(f'<div class="section-title">Cuentas por Cobrar — Detalle Facturas</div>', unsafe_allow_html=True)
-        cxc_positivo = df_cxc[df_cxc['Deuda_Pendiente'] > 0]
-        cxc_total = cxc_positivo['Deuda_Pendiente'].sum()
-        avg_dias = cxc_positivo['Dias_Atrasados'].mean() if len(cxc_positivo) > 0 else 0
+        
+        # Debora Total Neta (Positivos + Negativos)
+        cxc_total_neto = df_cxc['Deuda_Pendiente'].sum()
+        facturas_vencidas = df_cxc[df_cxc['Deuda_Pendiente'] > 0]
+        
+        n_docs = len(df_cxc)
+        avg_dias = facturas_vencidas['Dias_Atrasados'].mean() if len(facturas_vencidas) > 0 else 0
+        
         st.markdown(f"""<div class="info-row">
-            <div class="info-card"><div class="info-label">DEUDA TOTAL PENDIENTE (USD)</div><div class="info-value">{fmt_usd(cxc_total)}</div></div>
-            <div class="info-card"><div class="info-label">FACTURAS PENDIENTES</div><div class="info-value">{len(cxc_positivo)}</div></div>
+            <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div></div>
+            <div class="info-card"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div></div>
             <div class="info-card"><div class="info-label">DÍAS ATRASO PROM.</div><div class="info-value" style="color:{C['red'] if avg_dias > 30 else C['yellow']}">{avg_dias:.0f} días</div></div>
         </div>""", unsafe_allow_html=True)
 
         # ── Visualización Ranking de Deuda ──
-        cxc_agg = cxc_positivo.groupby('Cliente')['Deuda_Pendiente'].sum().reset_index().sort_values('Deuda_Pendiente', ascending=False).head(10)
+        # Ranking solo de deudores netos positivos
+        cxc_agg = df_cxc.groupby('Cliente')['Deuda_Pendiente'].sum().reset_index()
+        cxc_agg = cxc_agg[cxc_agg['Deuda_Pendiente'] > 0].sort_values('Deuda_Pendiente', ascending=False).head(10)
         if not cxc_agg.empty:
             st.markdown('<div class="card-container">', unsafe_allow_html=True)
             st.markdown(f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><b style="color:{C["white"]}; font-size:1rem;">Ranking Top 10 — Deuda por Cliente</b><span style="color:{C["gray"]}; font-size:0.8rem;">USD</span></div>', unsafe_allow_html=True)
@@ -1278,8 +1285,8 @@ with tab8:
         st.markdown(f'<div style="margin: 30px 0 15px 5px; border-left: 4px solid {C["cyan"]}; padding-left:15px;"><b style="color:{C["white"]}; font-size:1.2rem;">Detalle de Facturas por Cliente</b><br><small style="color:{C["gray"]};">Haga clic sobre un cliente para expandir sus facturas</small></div>', unsafe_allow_html=True)
         
         # Agrupamos por cliente
-        facturas_por_cliente = cxc_positivo.groupby('Cliente')
-        clientes_ordenados = cxc_positivo.groupby('Cliente')['Deuda_Pendiente'].sum().sort_values(ascending=False).index
+        facturas_por_cliente = df_cxc.groupby('Cliente')
+        clientes_ordenados = df_cxc.groupby('Cliente')['Deuda_Pendiente'].sum().sort_values(ascending=False).index
 
         accordion_html = '<div class="cxc-accordion">'
         
