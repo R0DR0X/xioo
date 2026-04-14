@@ -1243,7 +1243,7 @@ with tab8:
         
         n_docs = len(df_cxc)
         avg_dias = facturas_vencidas['Dias_Atrasados'].mean() if len(facturas_vencidas) > 0 else 0
-        max_dias = df_cxc['Dias_Atrasados'].max() if len(df_cxc) > 0 else 0
+        max_dias = facturas_vencidas['Dias_Atrasados'].max() if len(facturas_vencidas) > 0 else 0
         
         st.markdown(f"""<div class="info-row">
             <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div></div>
