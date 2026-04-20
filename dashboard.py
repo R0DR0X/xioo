@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import os, warnings, openpyxl, re
+import os, warnings, openpyxl, re, calendar
 warnings.filterwarnings('ignore')
 
 # ── Page Config ──────────────────────────────────────────────
@@ -587,6 +587,11 @@ with st.sidebar:
         d_start, d_end = min_date, max_date
     st.markdown(f"<div style='color:{C['muted']};font-size:0.75rem;margin-top:8px;'>Registros totales: <b style=\"color:{C['white']}\">{len(df_raw):,}</b></div>", unsafe_allow_html=True)
     st.markdown("---")
+    
+    # ── Objetivos ──
+    st.markdown(f"<div style='color:{C['cyan']};font-weight:800;font-size:1.1rem;margin-bottom:16px;'>🎯 OBJETIVOS</div>", unsafe_allow_html=True)
+    meta_inv = st.number_input("Meta Inventario Mes (TM)", value=2168, step=10, key="meta_inv_input")
+    st.markdown("---")
 
     # ── Registro: configuración de rangos FOB/KG por producto ──
     # with st.expander("📋 Registro — Rangos FOB/KG", expanded=False):
@@ -691,11 +696,12 @@ with tab1:
     with col_a:
         st.markdown('<div class="card-container"><b style="color:white;">FOB por Mercado de Destino PF</b>', unsafe_allow_html=True)
         if len(pf_markets) > 0:
-            top5m = pf_markets.head(5).reset_index()
-            top5m.columns = ['Pais','FOB']
-            fig_m = px.bar(top5m, y='Pais', x='FOB', orientation='h', color_discrete_sequence=[C['cyan']])
+            all_m = pf_markets.reset_index()
+            all_m.columns = ['Pais','FOB']
+            fig_m = go.Figure(go.Pie(labels=all_m['Pais'], values=all_m['FOB'], hole=0.55, textinfo='percent', textfont_size=10))
             fig_m.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
-                showlegend=False, margin=dict(l=0,r=0,t=10,b=0), height=250, xaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), yaxis=dict(autorange='reversed'))
+                showlegend=True, legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.05, font=dict(size=9)),
+                margin=dict(l=0,r=120,t=10,b=0), height=400)
             st.plotly_chart(fig_m, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
     with col_b:
@@ -802,10 +808,11 @@ with tab3:
     
     col_ch, col_tb = st.columns([1,1])
     with col_ch:
-        top_c = pf_country_all.head(8).reset_index()
-        fig_c = px.bar(top_c, y='Pais de Destino', x='U$ FOB Tot', orientation='h', color_discrete_sequence=[C['cyan']])
+        all_c = pf_country_all.reset_index()
+        fig_c = go.Figure(go.Pie(labels=all_c['Pais de Destino'], values=all_c['U$ FOB Tot'], hole=0.55, textinfo='percent', textfont_size=10))
         fig_c.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
-            showlegend=False, margin=dict(l=0,r=0,t=10,b=0), height=300, xaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'), yaxis=dict(autorange='reversed'))
+            showlegend=True, legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.05, font=dict(size=9)),
+            margin=dict(l=0,r=120,t=10,b=0), height=500)
         st.plotly_chart(fig_c, use_container_width=True)
     with col_tb:
         rows_c = ""
@@ -1365,6 +1372,52 @@ with tab9:
             <div class="kpi-card c3"><div class="kpi-label">INGRESOS</div><div class="kpi-value">{df_inv['INGRESOS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['INGRESOS'].sum():,.0f} kg</div></div>
             <div class="kpi-card c4"><div class="kpi-label">SALIDAS</div><div class="kpi-value">{df_inv['SALIDAS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['SALIDAS'].sum():,.0f} kg</div></div>
         </div>""", unsafe_allow_html=True)
+
+        # ── Seguimiento de Meta de Inventario ──
+        now = datetime.now()
+        cur_day = now.day
+        days_in_month = calendar.monthrange(now.year, now.month)[1]
+        expected_pct = (cur_day / days_in_month) * 100
+        real_pct = (total_stock_tm / meta_inv) * 100
+        
+        diff = real_pct - expected_pct
+        if abs(diff) <= 5:
+            progress_color = C['yellow']
+            status_text = "EN RANGO (+/- 5%)"
+            status_icon = "⚠️"
+        elif diff > 5:
+            progress_color = C['green']
+            status_text = "SOBRE LO ESPERADO"
+            status_icon = "📈"
+        else:
+            progress_color = C['red']
+            status_text = "BAJO LO ESPERADO"
+            status_icon = "📉"
+
+        st.markdown(f"""
+        <div class="card-container" style="border-left: 5px solid {progress_color};">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <div style="color:{C['muted']}; font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">Seguimiento de Meta Mensual (TM)</div>
+                    <div style="color:{C['white']}; font-size:1.8rem; font-weight:900; margin-top:5px;">{total_stock_tm:,.1f} / {meta_inv:,.0f} TM</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="color:{progress_color}; font-size:1.2rem; font-weight:800;">{status_icon} {status_text}</div>
+                    <div style="color:{C['muted']}; font-size:0.75rem;">Día {cur_day} de {days_in_month} del mes</div>
+                </div>
+            </div>
+            <div style="margin-top:20px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.8rem; font-weight:600;">
+                    <span style="color:{C['cyan']}">AVANCE REAL: {real_pct:.1f}%</span>
+                    <span style="color:{C['muted']}">AVANCE ESPERADO (AL DÍA): {expected_pct:.1f}%</span>
+                </div>
+                <div style="width:100%; height:12px; background:{C['card2']}; border-radius:10px; overflow:hidden; position:relative;">
+                    <div style="width:{min(real_pct, 100):.1f}%; height:100%; background:{progress_color}; border-radius:10px;"></div>
+                    <div style="position:absolute; left:{min(expected_pct, 99):.1f}%; top:0; width:3px; height:100%; background:{C['white']}; border-right:1px solid rgba(0,0,0,0.5);" title="Meta al día"></div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         # Table: show data exactly as-is from latest month, same order as Excel
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
