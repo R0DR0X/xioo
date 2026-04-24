@@ -104,6 +104,21 @@ st.markdown(f"""<style>
     .stTabs [data-baseweb="tab"] {{ color: {C['muted']}; border-radius: 8px; padding: 8px 20px; font-weight: 600; font-size: 0.85rem; }}
     .stTabs [aria-selected="true"] {{ background: {C['cyan']}; color: {C['bg']} !important; border-radius: 8px; }}
     .kpi-row {{ display: flex; gap: 16px; margin-bottom: 24px; }}
+    
+    /* Meta Tracker Styling */
+    .meta-container {{ background: {C['card']}; border: 1px solid {C['border']}; border-radius: 12px; padding: 20px 24px; border-left: 5px solid {C['cyan']}; margin-bottom: 16px; }}
+    .meta-title {{ color: {C['muted']}; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px; }}
+    .meta-vals {{ display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }}
+    .meta-val-main {{ color: {C['white']}; font-size: 1.8rem; font-weight: 900; }}
+    .meta-val-sep {{ color: {C['muted']}; font-size: 1.2rem; }}
+    .meta-val-goal {{ color: {C['muted']}; font-size: 1.2rem; font-weight: 700; }}
+    .meta-progress-bg {{ background: rgba(255,255,255,0.05); height: 8px; border-radius: 4px; overflow: hidden; position: relative; }}
+    .meta-progress-bar {{ background: {C['cyan']}; height: 100%; border-radius: 4px; }}
+    .meta-status-pill {{ position: absolute; top: 20px; right: 24px; background: {C['green']}22; color: {C['green']}; padding: 4px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 800; display: flex; align-items: center; gap: 6px; }}
+    .meta-footer {{ display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.72rem; font-weight: 600; }}
+    .meta-pct-real {{ color: {C['cyan']}; }}
+    .meta-pct-exp {{ color: {C['muted']}; }}
+
     .kpi-card {{ flex: 1; padding: 20px 24px; border-radius: 12px; border-left: 4px solid; }}
     .kpi-card.c1 {{ background: {C['card']}; border-color: {C['cyan']}; }}
     .kpi-card.c2 {{ background: {C['card']}; border-color: {C['blue']}; }}
@@ -134,7 +149,10 @@ st.markdown(f"""<style>
     .critical-row {{ background: rgba(239, 68, 68, 0.08) !important; border-left: 3px solid {C['red']} !important; }}
     .badge {{ display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }}
     .badge-green {{ background: {C['green']}22; color: {C['green']}; }}
+    .badge-yellow {{ background: {C['yellow']}22; color: {C['yellow']}; }}
     .badge-red {{ background: {C['red']}22; color: {C['red']}; }}
+    .badge-cyan {{ background: {C['cyan']}22; color: {C['cyan']}; }}
+    .badge-white {{ background: rgba(255,255,255,0.1); color: {C['white']}; }}
     .badge-gray {{ background: {C['muted']}22; color: {C['muted']}; }}
     .metric-row {{ display: flex; gap: 16px; }}
     .metric-card {{ flex: 1; border-radius: 12px; padding: 16px 20px; }}
@@ -473,6 +491,133 @@ def load_cxc():
     df = pd.DataFrame(rows)
     return df.sort_values(['Cliente', 'Deuda_Pendiente'], ascending=[True, False])
 
+@st.cache_data(ttl=60)
+def load_comex_docs():
+    """Lee Hoja1 del archivo PERU FROST 2026 en INPUT/
+       Maneja el patrón de filas fusionadas: la fila principal tiene ITEM+FP+Cliente+etc;
+       filas siguientes sin ITEM solo aportan contenedores adicionales.
+       Retorna lista de dicts con todos los FPs y sus contenedores.
+    """
+    base_dir = os.path.dirname(__file__)
+    input_dir = os.path.join(base_dir, "INPUT")
+    # Buscar archivos PERU FROST 2026 (cualquier variante)
+    pf_files = []
+    for d in [input_dir, base_dir]:
+        if os.path.exists(d):
+            for f in os.listdir(d):
+                f_low = f.lower()
+                if 'peru frost' in f_low and '2026' in f_low and f_low.endswith('.xlsx') and not f.startswith('~$'):
+                    pf_files.append(os.path.join(d, f))
+    if not pf_files:
+        return [], None
+    path = max(pf_files, key=os.path.getmtime)
+
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb['Hoja1'] if 'Hoja1' in wb.sheetnames else wb.active
+
+        # Mapear columnas dinámicamente desde fila 1
+        col_map = {}
+        for c in range(1, ws.max_column + 1):
+            v = str(ws.cell(1, c).value or '').strip().upper()
+            if 'ITEM' in v:       col_map['item']    = c
+            elif 'FP' in v:       col_map['fp']      = c
+            elif 'FACTURADO' in v: col_map['cliente'] = c
+            elif 'DESTINO' in v:  col_map['destino'] = c
+            elif v == 'CNT':      col_map['cnt']     = c
+            elif 'ZARPE' in v:    col_map['zarpe']   = c
+            elif 'LLEGADA' in v:  col_map['llegada'] = c
+            elif v == 'DRAFT':    col_map['draft']   = c
+            elif v == 'BL':       col_map['bl']      = c
+            elif v == 'SANIT':    col_map['sanit']   = c
+            elif v == 'FACT':     col_map['fact']    = c
+            elif v == 'CO':       col_map['co']      = c
+            elif v == 'CC':       col_map['cc']      = c
+            elif v == 'IV':       col_map['iv']      = c
+            elif 'ORIGINAL' in v: col_map['orig']    = c
+            elif 'OBSERV' in v:   col_map['obs']     = c
+
+        def _is_ok(val):
+            """True si el documento está aprobado ('ok')."""
+            if val is None: return False
+            s = str(val).strip().lower()
+            return s == 'ok'
+
+        def _is_pending(val):
+            """True si está explícitamente pendiente o vacío."""
+            if val is None: return True
+            s = str(val).strip().lower()
+            return s in ('', '-', 'none', 'pendiente', 'n/a')
+
+        def _is_en_proceso(val):
+            """True si tiene fecha u otro valor (ni ok ni pendiente)."""
+            if val is None: return False
+            s = str(val).strip().lower()
+            return not _is_ok(val) and not _is_pending(val)
+
+        fps = {}  # fp_key -> dict
+        current_fp_key = None
+
+        for r in range(2, ws.max_row + 1):
+            item_val = ws.cell(r, col_map.get('item', 1)).value
+            fp_val   = ws.cell(r, col_map.get('fp', 2)).value
+            cnt_val  = ws.cell(r, col_map.get('cnt', 6)).value
+
+            if item_val is not None:  # Fila principal del FP
+                fp_str = str(fp_val or '').strip()
+                if not fp_str:
+                    continue
+                cliente = str(ws.cell(r, col_map.get('cliente', 3)).value or '').strip()
+                destino = str(ws.cell(r, col_map.get('destino', 5)).value or '').strip()
+                zarpe   = ws.cell(r, col_map.get('zarpe', 7)).value
+                llegada = ws.cell(r, col_map.get('llegada', 8)).value
+                
+                zarpe_dt   = pd.to_datetime(zarpe,  errors='coerce') if zarpe else None
+                llegada_dt = pd.to_datetime(llegada, errors='coerce') if llegada else None
+
+                contenedores = []
+                if cnt_val:
+                    contenedores.append(str(cnt_val).strip())
+
+                def _dstat(key, default_col):
+                    """Retorna 'ok' | 'proceso' | 'pendiente' para un documento."""
+                    v = ws.cell(r, col_map.get(key, default_col)).value
+                    if _is_ok(v):         return 'ok'
+                    if _is_en_proceso(v): return 'proceso'
+                    return 'pendiente'
+
+                current_fp_key = fp_str
+                # Obtener valores crudos para DRAFT, ORIG (Q) y OBS (R)
+                draft_v = ws.cell(r, col_map.get('draft', 9)).value
+                orig_v  = ws.cell(r, col_map.get('orig', 17)).value
+                obs_v   = ws.cell(r, col_map.get('obs', 18)).value
+                
+                fps[fp_str] = {
+                    'fp': fp_str, 'cliente': cliente, 'destino': destino,
+                    'zarpe': zarpe_dt, 'llegada': llegada_dt,
+                    'obs': str(obs_v).strip() if obs_v else '',
+                    'docs': {
+                        'draft': _dstat('draft', 9),
+                        'draft_raw': str(draft_v).strip() if draft_v else '',
+                        'bl':    _dstat('bl',    10),
+                        'sanit': _dstat('sanit', 11),
+                        'fact':  _dstat('fact',  12),
+                        'co':    _dstat('co',    13),
+                        'cc':    _dstat('cc',    14),
+                        'iv':    _dstat('iv',    15),
+                        'orig':  _dstat('orig',  17),
+                        'orig_raw': str(orig_v).strip() if orig_v else '',
+                    },
+                    'contenedores': contenedores
+                }
+            elif current_fp_key and cnt_val:
+                fps[current_fp_key]['contenedores'].append(str(cnt_val).strip())
+
+        wb.close()
+        return list(fps.values()), path
+    except Exception as e:
+        return [], str(e)
+
 @st.cache_data
 def get_manual_summary(df, group_col):
     if df.empty: 
@@ -526,6 +671,7 @@ df_raw = load_data()
 df_rent, dbg_rent = load_rentabilidad()
 inv_months, df_inv = load_inventario()
 df_cxc = load_cxc()
+comex_docs, comex_src_path = load_comex_docs()
 
 # Generar tablas de rentabilidad de manera manual desde el Excel Resumen
 df_td_prod = get_manual_summary(df_rent, 'Producto')
@@ -588,9 +734,7 @@ with st.sidebar:
     st.markdown(f"<div style='color:{C['muted']};font-size:0.75rem;margin-top:8px;'>Registros totales: <b style=\"color:{C['white']}\">{len(df_raw):,}</b></div>", unsafe_allow_html=True)
     st.markdown("---")
     
-    # ── Objetivos ──
-    st.markdown(f"<div style='color:{C['cyan']};font-weight:800;font-size:1.1rem;margin-bottom:16px;'>🎯 OBJETIVOS</div>", unsafe_allow_html=True)
-    meta_inv = st.number_input("Meta Inventario Mes (TM)", value=2168, step=10, key="meta_inv_input")
+    st.markdown(f"<div style='color:{C['muted']};font-size:0.75rem;margin-top:8px;'>Registros totales: <b style=\"color:{C['white']}\">{len(df_raw):,}</b></div>", unsafe_allow_html=True)
     st.markdown("---")
 
     # ── Registro: configuración de rangos FOB/KG por producto ──
@@ -667,7 +811,7 @@ st.markdown(f"""<div class="kpi-row">
 </div>""", unsafe_allow_html=True)
 
 # ── TABS ─────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs(["📊 Resumen", "🧩 Mix & Participación", "🌍 Mercados", "🏆 Rankings", "💲 Precios & UT0", "📈 Histórico 12M", "🔝 Top 5", "👥 Clientes", "📦 Inventario", "💰 Rentabilidad", "🗄️ Base de Datos"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab10_comex, tab11 = st.tabs(["📊 Resumen", "🧩 Mix & Participación", "🌍 Mercados", "🏆 Rankings", "💲 Precios & UT0", "📈 Histórico 12M", "🔝 Top 5", "👥 Clientes", "📦 Inventario", "💰 Rentabilidad", "📋 COMEX Docs", "🗄️ Base de Datos"])
 
 # ═══════════════ TAB 1: RESUMEN EJECUTIVO ═══════════════════
 with tab1:
@@ -1352,11 +1496,7 @@ with tab8:
             accordion_html += f'</table></div></div>'
             
         accordion_html += '</div>'
-        st.markdown(accordion_html, unsafe_allow_html=True)
-
-
-
-# ═══════════════ TAB 9: INVENTARIO ══════════════════════════
+        st.markdown(accordion_html, unsafe_allow_html=True)# ═══════════════ TAB 9: INVENTARIO ══════════════════════════
 with tab9:
     st.markdown('<div class="section-title">Inventario de Producto Terminado</div>', unsafe_allow_html=True)
 
@@ -1372,52 +1512,6 @@ with tab9:
             <div class="kpi-card c3"><div class="kpi-label">INGRESOS</div><div class="kpi-value">{df_inv['INGRESOS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['INGRESOS'].sum():,.0f} kg</div></div>
             <div class="kpi-card c4"><div class="kpi-label">SALIDAS</div><div class="kpi-value">{df_inv['SALIDAS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['SALIDAS'].sum():,.0f} kg</div></div>
         </div>""", unsafe_allow_html=True)
-
-        # ── Seguimiento de Meta de Inventario ──
-        now = datetime.now()
-        cur_day = now.day
-        days_in_month = calendar.monthrange(now.year, now.month)[1]
-        expected_pct = (cur_day / days_in_month) * 100
-        real_pct = (total_stock_tm / meta_inv) * 100
-        
-        diff = real_pct - expected_pct
-        if abs(diff) <= 5:
-            progress_color = C['yellow']
-            status_text = "EN RANGO (+/- 5%)"
-            status_icon = "⚠️"
-        elif diff > 5:
-            progress_color = C['green']
-            status_text = "SOBRE LO ESPERADO"
-            status_icon = "📈"
-        else:
-            progress_color = C['red']
-            status_text = "BAJO LO ESPERADO"
-            status_icon = "📉"
-
-        st.markdown(f"""
-        <div class="card-container" style="border-left: 5px solid {progress_color};">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                <div>
-                    <div style="color:{C['muted']}; font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">Seguimiento de Meta Mensual (TM)</div>
-                    <div style="color:{C['white']}; font-size:1.8rem; font-weight:900; margin-top:5px;">{total_stock_tm:,.1f} / {meta_inv:,.0f} TM</div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="color:{progress_color}; font-size:1.2rem; font-weight:800;">{status_icon} {status_text}</div>
-                    <div style="color:{C['muted']}; font-size:0.75rem;">Día {cur_day} de {days_in_month} del mes</div>
-                </div>
-            </div>
-            <div style="margin-top:20px;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:0.8rem; font-weight:600;">
-                    <span style="color:{C['cyan']}">AVANCE REAL: {real_pct:.1f}%</span>
-                    <span style="color:{C['muted']}">AVANCE ESPERADO (AL DÍA): {expected_pct:.1f}%</span>
-                </div>
-                <div style="width:100%; height:12px; background:{C['card2']}; border-radius:10px; overflow:hidden; position:relative;">
-                    <div style="width:{min(real_pct, 100):.1f}%; height:100%; background:{progress_color}; border-radius:10px;"></div>
-                    <div style="position:absolute; left:{min(expected_pct, 99):.1f}%; top:0; width:3px; height:100%; background:{C['white']}; border-right:1px solid rgba(0,0,0,0.5);" title="Meta al día"></div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
 
         # Table: show data exactly as-is from latest month, same order as Excel
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
@@ -1440,6 +1534,8 @@ with tab9:
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.warning("⚠️ **Inventario vacío o fórmulas no calculadas:** No se encontraron productos con stock en el mes actual. Si acabas de subir el Excel desde Drive o un software externo, **ábrelo en tu Excel de escritorio y presiona 'Guardar'**. Esto obliga a Excel a calcular las fórmulas para que el Dashboard pueda leer los valores finales.")
+
+
 
 # ═══════════════ TAB 10: RENTABILIDAD ═══════════════════════
 with tab10:
@@ -1674,7 +1770,385 @@ with tab11:
         with open(c_path, "rb") as f: c_bytes = f.read()
         dl_c5.download_button("👥 Excel CxC", c_bytes, "Cartera_CxC.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-# ── Footer ───────────────────────────────────────────────────
+# ═══════════════ TAB COMEX: CONTROL DOCUMENTAL ══════════════
+with tab10_comex:
+    TODAY_C = datetime.now().date()
+
+    # ─── Static Goals ───────────────────────────────────────────
+    # Vol: Meta 1914 TM, Avance 3081.82 TM
+    # FOB: Meta 4.4M, Avance 7,441,832 USD
+    
+    meta_vol = 1914.0
+    avance_vol = 3081.82
+    meta_fob = 4400000.0
+    avance_fob = 7441832.0
+
+    gcol1, gcol2 = st.columns(2)
+    
+    # 1. Tracker Volumen
+    pct_vol = (avance_vol / meta_vol) * 100
+    status_vol = "SOBRE LO ESPERADO" if pct_vol >= 100 else "EN PROGRESO"
+    status_ico_vol = "📈" if pct_vol >= 100 else "⏳"
+    status_col_vol = C['green'] if pct_vol >= 100 else C['yellow']
+    
+    gcol1.markdown(f"""
+    <div class="meta-container">
+        <div class="meta-status-pill" style="background:{status_col_vol}22; color:{status_col_vol};">
+            {status_ico_vol} {status_vol}
+        </div>
+        <div class="meta-title">Seguimiento de Meta Mensual (TM)</div>
+        <div class="meta-vals">
+            <span class="meta-val-main">{avance_vol:,.1f}</span>
+            <span class="meta-val-sep">/</span>
+            <span class="meta-val-goal">{meta_vol:,.0f} TM</span>
+        </div>
+        <div class="meta-progress-bg">
+            <div class="meta-progress-bar" style="width:{min(100, pct_vol)}%; background:{status_col_vol};"></div>
+        </div>
+        <div class="meta-footer">
+            <div class="meta-pct-real">AVANCE REAL: {pct_vol:.1f}%</div>
+            <div class="meta-pct-exp">AVANCE ESPERADO (AL DÍA): 80.0%</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 2. Tracker FOB
+    pct_fob = (avance_fob / meta_fob) * 100
+    status_fob = "SOBRE LO ESPERADO" if pct_fob >= 100 else "EN PROGRESO"
+    status_ico_fob = "💰" if pct_fob >= 100 else "⏳"
+    status_col_fob = C['green'] if pct_fob >= 100 else C['yellow']
+    
+    gcol2.markdown(f"""
+    <div class="meta-container" style="border-color:{C['blue']};">
+        <div class="meta-status-pill" style="background:{status_col_fob}22; color:{status_col_fob};">
+            {status_ico_fob} {status_fob}
+        </div>
+        <div class="meta-title">Seguimiento de Meta Mensual (USD FOB)</div>
+        <div class="meta-vals">
+            <span class="meta-val-main">${avance_fob/1e6:,.2f}M</span>
+            <span class="meta-val-sep">/</span>
+            <span class="meta-val-goal">$4.4M</span>
+        </div>
+        <div class="meta-progress-bg">
+            <div class="meta-progress-bar" style="width:{min(100, pct_fob)}%; background:{C['blue']};"></div>
+        </div>
+        <div class="meta-footer">
+            <div class="meta-pct-real" style="color:{C['blue']}">AVANCE REAL: {pct_fob:.1f}%</div>
+            <div class="meta-pct-exp">AVANCE ESPERADO (AL DÍA): 80.0%</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ─── Helpers ─────────────────────────────────────────────────
+    def _cx_estado(zarpe, llegada):
+        if zarpe is None or llegada is None:
+            return {'text': 'Sin fecha', 'color': C['muted'], 'code': 'UNKNOWN'}
+        zd = zarpe.date() if hasattr(zarpe, 'date') else zarpe
+        ld = llegada.date() if hasattr(llegada, 'date') else llegada
+        if TODAY_C < zd:
+            return {'text': 'Por Zarpar', 'color': C['yellow'], 'code': 'PENDING'}
+        if zd <= TODAY_C <= ld:
+            return {'text': 'En Tránsito', 'color': C['blue'], 'code': 'TRANSIT'}
+        if (TODAY_C - ld).days > 2:
+            return {'text': 'Retrasado', 'color': C['red'], 'code': 'DELAYED'}
+        return {'text': 'Arribado', 'color': C['green'], 'code': 'ARRIVED'}
+
+    def _cx_dias(llegada):
+        if llegada is None: return None
+        ld = llegada.date() if hasattr(llegada, 'date') else llegada
+        return (ld - TODAY_C).days
+
+    def _cx_pct(docs):
+        # User defined documents: bl, sanit, fact, co, cc, iv, otros (orig)
+        keys_main = ['bl', 'sanit', 'fact', 'co', 'cc', 'iv', 'orig']
+        score = sum(1.0 if docs.get(k) == 'ok' else (0.5 if docs.get(k) == 'proceso' else 0.0)
+                    for k in keys_main)
+        return round(score / len(keys_main) * 100)
+
+    def _cx_riesgo(dias, pct):
+        if pct == 100:
+            return {'label': 'Docs OK',           'color': C['green'],  'border': C['green']+'33',  'bg': C['green']+'11'}
+        if dias is None or dias <= 0:
+            return {'label': 'Crítico: Sin Docs',  'color': C['red'],    'border': C['red']+'33',    'bg': C['red']+'11'}
+        if dias <= 15:
+            return {'label': f'Crítico: {dias}d',  'color': C['red'],    'border': C['red']+'33',    'bg': C['red']+'11'}
+        if dias <= 30:
+            return {'label': f'Alerta: {dias}d',   'color': C['yellow'], 'border': C['yellow']+'33', 'bg': C['yellow']+'11'}
+        return     {'label': f'En Tiempo: {dias}d', 'color': C['blue'],   'border': C['blue']+'33',   'bg': C['blue']+'11'}
+
+    DOC_PIX = {
+        'ok':       {'bg': '#16a34a11', 'border': '#16a34a33', 'color': '#22c55e', 'label': 'APROBADO',   'ico': '✅'},
+        'proceso':  {'bg': '#d9770611', 'border': '#d9770633', 'color': '#f59e0b', 'label': 'EN PROCESO',  'ico': '🟡'},
+        'pendiente':{'bg': '#dc262611', 'border': '#dc262644', 'color': '#ef4444', 'label': 'PENDIENTE',   'ico': '❌'},
+    }
+
+    # ─── Header ──────────────────────────────────────────────────
+    hc1, hc2 = st.columns([3, 1])
+    with hc1:
+        st.markdown(f"""
+        <div style="padding:4px 0 12px 0;">
+          <div style="font-size:1.9rem;font-weight:900;color:{C['white']};">COMEX Document Hub</div>
+          <div style="color:{C['cyan']};font-size:0.88rem;margin-top:2px;">⚓ Control Logístico y Trazabilidad Documental</div>
+        </div>""", unsafe_allow_html=True)
+    with hc2:
+        st.markdown(f"""
+        <div style="background:{C['card']};border:1px solid {C['border']};border-radius:10px;
+             padding:12px 18px;display:flex;align-items:center;gap:12px;">
+          <div style="font-size:1.4rem;">📅</div>
+          <div>
+            <div style="color:{C['white']};font-size:0.95rem;font-weight:800;">{TODAY_C.strftime('%d %b %Y')}</div>
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+    if st.button("🔄 Recargar Datos", key="btn_reload_comex3"):
+        st.cache_data.clear()
+        st.rerun()
+
+    if not comex_docs:
+        st.warning("⚠️ No se encontró el archivo **PERU FROST 2026** en INPUT/.")
+    else:
+        processed = []
+        for fp_data in comex_docs:
+            dias   = _cx_dias(fp_data['llegada'])
+            pct    = _cx_pct(fp_data['docs'])
+            estado = _cx_estado(fp_data['zarpe'], fp_data['llegada'])
+            
+            # Logic for fully reported/clear docs
+            orig_raw_v = fp_data['docs'].get('orig_raw', '').upper()
+            obs_v = fp_data.get('obs', '').upper()
+            fully_ok = ("REPORTADO" in orig_raw_v) and (not obs_v or "SIN OBSERVACION" in obs_v)
+            
+            if fully_ok:
+                riesgo = {'label': 'Finalizado/OK', 'color': C['green'], 'border': C['green']+'33', 'bg': C['green']+'11'}
+                en_riesgo = False
+            else:
+                riesgo = _cx_riesgo(dias, pct)
+                en_riesgo = (pct < 100 and dias is not None and 0 <= dias <= 15)
+                
+            processed.append({**fp_data, 'estado': estado, 'dias': dias,
+                                'pct': pct, 'riesgo': riesgo, 'en_riesgo': en_riesgo, 'fully_ok': fully_ok})
+
+        # ─── Visual Analysis (Shipments Trend Line) ──────────────────
+        st.markdown('<div class="card-container">', unsafe_allow_html=True)
+        st.markdown(f'<div style="color:{C["white"]}; font-size:1.1rem; font-weight:800; margin-bottom:15px; display:flex; align-items:center; gap:10px;">📉 TENDENCIA DE EMBARQUES (FPs)</div>', unsafe_allow_html=True)
+        
+        df_shipments = pd.DataFrame(processed)
+        df_shipments['Mes_Zarpe'] = df_shipments['zarpe'].apply(lambda x: x.strftime('%b %Y') if pd.notnull(x) else 'Sin Fecha')
+        
+        month_order = sorted(df_shipments['zarpe'].dropna().unique())
+        month_labels = [m.strftime('%b %Y') for m in month_order]
+        if 'Sin Fecha' in df_shipments['Mes_Zarpe'].values:
+            month_labels.append('Sin Fecha')
+
+        df_counts = df_shipments.groupby('Mes_Zarpe')['fp'].count().reindex(month_labels).fillna(0).reset_index()
+        df_counts.columns = ['Mes', 'Cantidad']
+
+        fig_ship = px.line(df_counts, x='Mes', y='Cantidad', markers=True,
+                           line_shape='spline', render_mode='svg')
+        
+        fig_ship.update_traces(line_color=C['cyan'], line_width=4, marker=dict(size=12, color=C['cyan'], line=dict(width=2, color=C['white'])))
+        fig_ship.update_layout(
+            margin=dict(l=40, r=40, t=10, b=10),
+            height=300,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font_color=C['muted'],
+            xaxis=dict(showgrid=False, title="", tickfont=dict(size=10)),
+            yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.05)', title="", zeroline=False),
+        )
+        st.plotly_chart(fig_ship, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # ─── Monitor Integral ─────────────────────────────────────
+        st.markdown(f"""
+        <div style="background:{C['card']};border:1px solid {C['border']};border-radius:14px;
+             padding:18px 24px 14px;margin:8px 0 12px 0;border-left:4px solid {C['cyan']};">
+          <div style="color:{C['white']};font-size:1.25rem;font-weight:900;">
+            📁 Monitor Integral de Documentos por Cliente
+          </div>
+          <div style="color:{C['muted']};font-size:0.85rem;margin-top:3px;">
+            Seguimiento en tiempo real de carpetas de exportación y cumplimiento documental.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        clientes = {}
+        for fp in processed:
+            cli = fp['cliente'].strip() or 'SIN CLIENTE'
+            if cli not in clientes: clientes[cli] = []
+            clientes[cli].append(fp)
+        clientes_sorted = sorted(clientes.items(),
+                                 key=lambda x: -sum(len(f['contenedores']) for f in x[1]))
+
+        # Definir los documentos a mostrar según el usuario
+        # bl sanit fact co cc iv otros (otros es columna Q -> 'orig')
+        DOCS_LIST = [
+            ('bl','BL'), ('sanit','SANITARIO'), ('fact','FACTURA'),
+            ('co','C. ORIGEN'), ('cc','COPIA CERT.'), ('iv','INSPEC. VET.'),
+            ('orig','OTROS (Q)')
+        ]
+
+        for cli_name, fps_list in clientes_sorted:
+            total_cli_cntrs = sum(len(f['contenedores']) for f in fps_list)
+            cli_alerts  = sum(1 for f in fps_list if f['en_riesgo'])
+            
+            expander_label = (
+                f"👤 {cli_name}   |   📦 {total_cli_cntrs} CNTRs"
+                f"{'   ⚠️ ' + str(cli_alerts) + ' Riesgo' if cli_alerts else ''}"
+            ).upper()
+
+            with st.expander(expander_label, expanded=False):
+                for fp in fps_list:
+                    dias   = fp['dias']
+                    pct    = fp['pct']
+                    estado = fp['estado']
+                    riesgo = fp['riesgo']
+                    
+                    # Calcular cuántos van y cuántos faltan (de los 7 principales)
+                    total_docs = len(DOCS_LIST)
+                    docs_ok = sum(1 for dk, dl in DOCS_LIST if fp['docs'].get(dk) == 'ok')
+                    docs_missing = total_docs - docs_ok
+
+                    # DRAFT Handling: get the raw value if it's not OK or Pendiente
+                    draft_raw = fp['docs'].get('draft', 'pendiente')
+                    # In our _dstat, we return 'ok', 'proceso', or 'pendiente'. 
+                    # If we want the literal value from Excel, we need to adjust load_comex_docs
+                    # but for now let's use the icon/status color
+                    
+                    if fp.get('fully_ok'):
+                        eta_badge = f'<div style="background:{C["green"]}; color:white; padding:4px 12px; border-radius:15px; font-weight:800; font-size:0.75rem;">✅ {dias} DÍAS</div>'
+                    elif dias is not None:
+                        if dias <= 10:
+                            eta_badge = f'<div style="background:{C["red"]}; color:white; padding:4px 12px; border-radius:15px; font-weight:800; font-size:0.75rem;">⚠️ {dias} DÍAS</div>'
+                        elif dias <= 15:
+                            eta_badge = f'<div style="background:{C["yellow"]}; color:black; padding:4px 12px; border-radius:15px; font-weight:800; font-size:0.75rem;">⏳ {dias} DÍAS</div>'
+                        else:
+                            eta_badge = f'<div style="background:{C["muted"]}55; color:white; padding:4px 12px; border-radius:15px; font-weight:800; font-size:0.75rem;">🚢 {dias} DÍAS</div>'
+                    else:
+                        eta_badge = f'<div style="background:transparent; color:{C["muted"]}; border:1px solid {C["muted"]}; padding:4px 12px; border-radius:15px; font-weight:800; font-size:0.75rem;">PENDIENTE</div>'
+
+                    # Remove checkmark from label as requested
+                    fp_label = f"📦 {fp['fp']} | {fp['destino'].upper()} | {docs_ok}/{total_docs} DOCS"
+                    
+                    # Custom expander header
+                    st.markdown(f"""
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:linear-gradient(90deg, {C['card']} 0%, {C['card2']} 100%); 
+                         padding:12px 20px; border-radius:12px; border:1px solid {C['border']}; margin-top:12px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                        <div style="display:flex; flex-direction:column;">
+                            <div style="font-weight:900; color:{C['white']}; font-size:1.1rem; letter-spacing:0.5px;">{fp['fp']}</div>
+                            <div style="color:{C['muted']}; font-size:0.7rem; font-weight:600; text-transform:uppercase;">{fp['destino']}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:20px;">
+                            <div style="text-align:right;">
+                                <div style="color:{C['muted']}; font-size:0.6rem; font-weight:700; text-transform:uppercase;">Arribo</div>
+                                {eta_badge}
+                            </div>
+                            <div style="text-align:right; border-left:1px solid {C['border']}; padding-left:20px;">
+                                <div style="color:{C['muted']}; font-size:0.6rem; font-weight:700; text-transform:uppercase;">Docs</div>
+                                <div style="font-weight:800; color:{C['cyan']}; font-size:1.1rem;">{docs_ok} <span style="font-size:0.7rem; opacity:0.6;">/ {total_docs}</span></div>
+                            </div>
+                        </div>
+                    </div>""", unsafe_allow_html=True)
+
+                    with st.expander(f"DETALLE {fp['fp']}", expanded=False):
+                        # Mini Cards
+                        mk1, mk2, mk3, mk4 = st.columns(4)
+                        
+                        # 1. Volumen
+                        mk1.markdown(f"""
+                        <div style="background:{C['card2']};border:1px solid {C['border']};border-radius:10px;padding:15px;position:relative;">
+                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">VOLUMEN</div>
+                          <div style="color:{C['white']};font-size:1.4rem;font-weight:900;margin-top:4px;">{len(fp['contenedores'])} <span style="font-size:0.75rem;opacity:0.6;">CNTR</span></div>
+                        </div>""", unsafe_allow_html=True)
+                        
+                        # 2. DRAFT - Especial
+                        d_st = fp['docs'].get('draft', 'pendiente')
+                        d_raw = fp['docs'].get('draft_raw', '—')
+                        d_col = DOC_PIX[d_st]['color']
+                        mk2.markdown(f"""
+                        <div style="background:{C['card2']};border:1px solid {C['border']};border-radius:10px;padding:15px;border-bottom:3px solid {d_col};">
+                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">FECHA DRAFT</div>
+                          <div style="color:{d_col};font-size:1.2rem;font-weight:900;margin-top:4px;">{d_raw.upper()}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                        # 3. Avance
+                        mk3.markdown(f"""
+                        <div style="background:{C['card2']};border:1px solid {C['border']};border-radius:10px;padding:15px;">
+                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">AVANCE CARPETA</div>
+                          <div style="color:{C['cyan']};font-size:1.4rem;font-weight:900;margin-top:4px;">{pct}%</div>
+                        </div>""", unsafe_allow_html=True)
+
+                        # 4. ETA / Riesgo
+                        r_col = riesgo['color']
+                        mk4.markdown(f"""
+                        <div style="background:{riesgo['bg']};border:1px solid {riesgo['border']};border-radius:10px;padding:15px;">
+                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">ESTATUS RIESGO</div>
+                          <div style="color:{r_col};font-size:1rem;font-weight:900;margin-top:4px;text-transform:uppercase;">{riesgo['label']}</div>
+                        </div>""", unsafe_allow_html=True)
+
+                        # Pills de Documentos
+                        st.markdown(f'<div style="color:{C["muted"]};font-size:0.65rem;font-weight:800;letter-spacing:1px;margin:15px 0 8px 0;">CHECKLIST DOCUMENTAL ({docs_ok} Completos / {docs_missing} Pendientes)</div>', unsafe_allow_html=True)
+                        
+                        p_cols = st.columns(len(DOCS_LIST))
+                        for i, (dk, dl) in enumerate(DOCS_LIST):
+                            dstate = fp['docs'].get(dk, 'pendiente')
+                            px = DOC_PIX[dstate]
+                            p_cols[i].markdown(f"""
+                            <div style="background:{C['card']};border:1px solid {px['border']};border-top:3px solid {px['color']};border-radius:6px;padding:8px 4px;text-align:center;">
+                              <div style="font-size:0.85rem;">{px['ico']}</div>
+                              <div style="color:{C['white']};font-size:0.55rem;font-weight:700;margin-top:4px;white-space:nowrap;">{dl}</div>
+                            </div>""", unsafe_allow_html=True)
+
+                        # Status Message Mejorado (incluye Columna R - obs)
+                        obs = fp.get('obs', '')
+                        orig_val = fp['docs'].get('orig_raw', '')
+                        
+                        # Logic for green badges: Reportado + No observations
+                        is_all_ok = "REPORTADO" in orig_val.upper() and (not obs or "SIN OBSERVACION" in obs.upper())
+                        badge_bg = "rgba(22,163,74,0.15)" if is_all_ok else "rgba(255,255,255,0.03)"
+                        badge_border = C['green'] if is_all_ok else C['border']
+                        badge_text = C['green'] if is_all_ok else C['white']
+
+                        msg_col = C['red'] if fp['en_riesgo'] else (C['green'] if pct == 100 else C['yellow'])
+                        msg_bg = msg_col + "11"
+                        
+                        status_msg = f"⚠️ Pendiente: {docs_missing} documentos." if docs_missing > 0 else "✅ Carpeta completa."
+                        if dias is not None:
+                            if dias >= 0:
+                                status_msg += f" | Faltan {dias} días para arribo."
+                            else:
+                                status_msg += f" | Arribó hace {abs(dias)} días."
+                        
+                        st.markdown(f"""
+                        <div style="margin-top:12px;padding:12px 16px;background:{msg_bg};border:1px solid {msg_col}33;border-radius:8px;">
+                          <div style="color:{msg_col};font-weight:700;font-size:0.85rem;">{status_msg}</div>
+                          
+                          <div style="margin-top:12px; display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                            <div style="background:{badge_bg}; padding:10px; border-radius:6px; border:1px solid {badge_border};">
+                                <div style="color:{C['muted']}; font-size:0.6rem; font-weight:800; text-transform:uppercase;">Originales</div>
+                                <div style="color:{badge_text}; font-size:0.85rem; font-weight:700; margin-top:4px;">{orig_val if orig_val else "—"}</div>
+                            </div>
+                            <div style="background:{badge_bg}; padding:10px; border-radius:6px; border:1px solid {badge_border};">
+                                <div style="color:{C['muted']}; font-size:0.6rem; font-weight:800; text-transform:uppercase;">Observación</div>
+                                <div style="color:{badge_text}; font-size:0.85rem; font-weight:700; margin-top:4px;">{obs if obs else "Sin observaciones."}</div>
+                            </div>
+                          </div>
+                        </div>""", unsafe_allow_html=True)
+
+        with st.expander("📊 Reporte Detallado", expanded=False):
+            DOCS_ALL = ['draft', 'bl', 'sanit', 'fact', 'co', 'cc', 'iv', 'orig']
+            rows_exp = []
+            for fp in processed:
+                row = {
+                    'FP': fp['fp'], 'Cliente': fp['cliente'], 'Destino': fp['destino'],
+                    'ETA': fp['dias'], 'Estado': fp['estado']['text'], 'Avance %': fp['pct'],
+                    'Observaciones': fp.get('obs', '')
+                }
+                for d in DOCS_ALL: row[d.upper()] = fp['docs'].get(d, 'pendiente').upper()
+                rows_exp.append(row)
+            st.dataframe(pd.DataFrame(rows_exp), use_container_width=True)
+
+
+# -- Footer ---------------------------------------------------
 st.markdown(f"""<div style="text-align:center;margin-top:40px;padding:20px;border-top:1px solid {C['border']};">
     <div style="color:{C['cyan']};font-weight:700;">PERU FROST S.A.C.</div>
     <div style="color:{C['muted']};font-size:0.75rem;">Dashboard Ejecutivo Integral — Análisis de Exportaciones {period_str}<br>
