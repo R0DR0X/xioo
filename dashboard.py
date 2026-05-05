@@ -1579,14 +1579,22 @@ with tab10:
             
             prods_det = sorted([str(p) for p in df_det['Producto'].dropna().unique()])
             
-            header_html = f"<tr><th style='background:{C['card2']}; position:sticky; left:0; z-index:2;'>Producto</th>"
+            # Cabecera con 2 niveles: Mes arriba (colspan 3) y métricas abajo
+            header_html = f"<tr><th rowspan='2' style='background:{C['card2']}; position:sticky; left:0; z-index:3; vertical-align:middle; border-right: 1px solid {C['border']}66;'>Producto</th>"
             for m in meses_activos:
-                header_html += f"<th style='text-align:center; background:{C['card2']}'>{meses_nombres.get(m, m)}</th>"
+                header_html += f"<th colspan='3' style='text-align:center; background:{C['card2']}; border-bottom:1px solid {C['border']}66; border-right: 1px solid {C['border']}33;'>{meses_nombres.get(m, m).upper()}</th>"
+            header_html += "</tr>"
+            
+            header_html += "<tr>"
+            for m in meses_activos:
+                header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}11;'>CFR</th>"
+                header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}11;'>UTIL</th>"
+                header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}33;'>MG</th>"
             header_html += "</tr>"
             
             rows_html_det = ""
             for p in prods_det:
-                row_html = f"<tr><td style='font-weight:700; color:{C['white']}; border-right: 1px solid {C['border']}33; position:sticky; left:0; background:{C['card']}; z-index:1;'>{p}</td>"
+                row_html = f"<tr><td style='font-weight:700; color:{C['white']}; border-right: 1px solid {C['border']}66; position:sticky; left:0; background:{C['card']}; z-index:1;'>{p}</td>"
                 for m in meses_activos:
                     sub = df_det[(df_det['Producto'] == p) & (df_det['Mes_N'] == m)]
                     if not sub.empty:
@@ -1595,13 +1603,13 @@ with tab10:
                         m_val = (u_val / c_val) if c_val > 0 else 0
                         m_col = C['green'] if m_val > 0 else (C['red'] if m_val < 0 else C['muted'])
                         
-                        row_html += f"""<td style='text-align:center; padding:10px 5px;'>
-                            <div style='font-size:0.65rem; color:{C['muted']};'>CFR: <span style='color:{C['cyan']}; font-weight:600;'>{fmt_usd(c_val)}</span></div>
-                            <div style='font-size:0.65rem; color:{C['muted']};'>Util: <span style='color:{C['white']}; font-weight:600;'>{fmt_usd(u_val)}</span></div>
-                            <div style='font-size:0.75rem; font-weight:800; color:{m_col}; margin-top:2px;'>MG: {m_val:.1f}%</div>
-                        </td>"""
+                        row_html += f"<td style='text-align:right; font-size:0.75rem; color:{C['cyan']}; border-right: 1px solid {C['border']}11;'>{fmt_usd(c_val)}</td>"
+                        row_html += f"<td style='text-align:right; font-size:0.75rem; color:{C['white']}; border-right: 1px solid {C['border']}11;'>{fmt_usd(u_val)}</td>"
+                        row_html += f"<td style='text-align:center; font-size:0.75rem; font-weight:700; color:{m_col}; border-right: 1px solid {C['border']}33;'>{m_val*100:.1f}%</td>"
                     else:
-                        row_html += "<td style='text-align:center; color:#333;'>—</td>"
+                        row_html += f"<td style='text-align:center; color:#333; border-right: 1px solid {C['border']}11;'>—</td>"
+                        row_html += f"<td style='text-align:center; color:#333; border-right: 1px solid {C['border']}11;'>—</td>"
+                        row_html += f"<td style='text-align:center; color:#333; border-right: 1px solid {C['border']}33;'>—</td>"
                 row_html += "</tr>"
                 rows_html_det += row_html
                 
