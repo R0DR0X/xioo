@@ -67,24 +67,26 @@ PRODUCT_COLORS = {
     "ALAS CONGELADAS":"#3b82f6","FILETE CONGELADO":"#22c55e","NUCA":"#f59e0b",
     "REPRODUCTOR":"#a855f7","TENTACULO":"#ef4444",
     "ALAS COCIDAS":"#06b6d4","FILETE COCIDO":"#f97316",
+    "POTA NUCAS CONGELADAS":"#f59e0b", "POTA ALAS CONGELADAS":"#3b82f6",
+    "POTA REJOS CONGELADOS":"#ef4444", "POTA REJOS CONGELADOS OR":"#a855f7",
+    "POTA FILETE DARUMA":"#22c55e", "POTA ALAS COCIDAS":"#06b6d4",
+    "POTA RECORTE COCIDO":"#f97316", "BONITO ENT":"#3b82f6"
 }
 
-# ── UT0 Estáticos (Precio de Equilibrio) ─────────────────────
+# ── UT0 Estáticos (Precio de Equilibrio USD/TM) ──────────────
 UT0_FIXED = {
-    # Nombres EXACTOS según el Excel Clasificado
-    "ALAS CONGELADAS": 2046.96,
-    "FILETE CONGELADO": 2048.63,
-    "NUCA": 2168.63,
-    "TENTACULO": 2038.63,  # Rejos
-    "REPRODUCTOR": 2008.63, # Rejos OR
-    
-    # Cocidos
-    "ALAS COCIDAS": None,
-    "FILETE COCIDO": 2418.63,
+    "ALAS COCIDAS": 2892.0,
+    "FILETE COCIDO": 2716.0,
+    "NUCA": 2589.0,
+    "ALAS CONGELADAS": 2472.0,
 }
 
-PROD_FRESCO = ["ALAS CONGELADAS", "FILETE CONGELADO", "NUCA", "REPRODUCTOR", "TENTACULO"]
-PROD_COCIDO = ["ALAS COCIDAS", "FILETE COCIDO"]
+PROD_FRESCO = [
+    "ALAS CONGELADAS", "FILETE CONGELADO", "NUCA", "REPRODUCTOR", "TENTACULO"
+]
+PROD_COCIDO = [
+    "ALAS COCIDAS", "FILETE COCIDO"
+]
 
 # ── CSS ──────────────────────────────────────────────────────
 st.markdown(f"""<style>
@@ -263,16 +265,19 @@ def load_rentabilidad():
         
         # Mapa de búsqueda (Lo que buscamos en el Excel -> El nombre que usaremos en el DataFrame)
         target_map = {
+            'MES EJERCICIO': 'Mes Ejercicio',
             'FECHA EMBARQUE': 'Fecha Embarque',
             'CANTIDAD': 'Cantidad',
             'PRODUCTO': 'Producto',
+            'PAIS': 'Pais',
             'CLIENTE (RAZON SOCIAL)': 'Cliente',
             'VALOR CFR': 'VALOR CFR',
+            'VALOR FOB': 'VALOR FOB',
             'UTILIDAD NETA': 'UTILIDAD NETA',
             'UTILIDAD BRUTA': 'UTILIDAD BRUTA',
             'PRECIO TM': 'Precio TM',
-            'VALOR FOB': 'VALOR FOB',
-            'COSTO UNITARIO': 'COSTO UNITARIO'
+            'COSTO UNITARIO': 'COSTO UNITARIO',
+            'MARGEN NETO': 'Margen Neto'
         }
         
         final_col_map = {} # {Nombre_DF: c_idx}
@@ -308,7 +313,7 @@ def load_rentabilidad():
         
         if not df.empty:
             # Tipado Numérico
-            num_cols = ['Cantidad', 'VALOR CFR', 'UTILIDAD NETA', 'UTILIDAD BRUTA', 'Precio TM', 'VALOR FOB', 'COSTO UNITARIO']
+            num_cols = ['Cantidad', 'VALOR CFR', 'UTILIDAD NETA', 'UTILIDAD BRUTA', 'Precio TM', 'VALOR FOB', 'COSTO UNITARIO', 'Margen Neto']
             for col in num_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -387,11 +392,12 @@ def load_inventario():
     
     # Target common sheet names en orden de prioridad (mes más reciente primero)
     target_sheets = [
+        'mayo2026', 'mayo',
+        'junio2026', 'junio',
         'abril2026', 'abril', 
         'marzo2026', 'marzo', 
         'febrero2026', 'febrero', 
-        'enero2026', 'enero',
-        'mayo2026', 'junio2026'
+        'enero2026', 'enero'
     ]
     latest_key = None
     all_months_clean = {k.lower().strip().replace(" ", ""): k for k in all_months.keys()}
@@ -673,7 +679,8 @@ inv_months, df_inv = load_inventario()
 df_cxc = load_cxc()
 comex_docs, comex_src_path = load_comex_docs()
 
-# Generar tablas de rentabilidad de manera manual desde el Excel Resumen
+# UT0_FIXED se definió al inicio del archivo
+
 df_td_prod = get_manual_summary(df_rent, 'Producto')
 df_td_cli = get_manual_summary(df_rent, 'Cliente')
 
@@ -866,7 +873,9 @@ with tab1:
     for prod in all_products:
         prod_df = df_classified[df_classified['PRODUCTO']==prod]
         pf_prod = prod_df[prod_df['Exportador'].apply(is_pf)]
-        pf_utm = (pf_prod['U$ FOB Tot'].sum() / pf_prod['Kg Neto'].sum() * 1000) if pf_prod['Kg Neto'].sum()>0 else None
+        pf_kg = pf_prod['Kg Neto'].sum()
+        pf_pct_tm = (pf_kg / peso_neto_pf * 100) if peso_neto_pf > 0 else 0
+        pf_utm = (pf_prod['U$ FOB Tot'].sum() / pf_kg * 1000) if pf_kg>0 else None
         
         # UT0 lookup
         ut0 = UT0_FIXED.get(prod)
@@ -878,8 +887,8 @@ with tab1:
         vs_mkt_icon = f'<span style="color:{C["green"]}">↗ +{vs_mkt:.0f}</span>' if vs_mkt and vs_mkt>=0 else (f'<span style="color:{C["red"]}">↘ {vs_mkt:.0f}</span>' if vs_mkt else "—")
         vs_ut0_icon = f'<span style="color:{C["green"]}">↗ +{vs_ut0:.0f}</span>' if vs_ut0 and vs_ut0>=0 else (f'<span style="color:{C["red"]}">↘ {vs_ut0:.0f}</span>' if vs_ut0 else "—")
         estado = '<span class="badge badge-green">Sobre UT0</span>' if vs_ut0 and vs_ut0>=0 else ('<span class="badge badge-red">Bajo UT0</span>' if vs_ut0 and vs_ut0<0 else '<span class="badge badge-gray">Sin referencia</span>')
-        rows_html += f"<tr><td>{prod}</td><td style='color:{C['cyan']};font-weight:700;'>{fmt_usd(pf_utm) if pf_utm else '—'}</td><td>{fmt_usd(mkt_utm) if mkt_utm else '—'}</td><td style='color:{C['orange']};font-weight:700;'>{fmt_usd(ut0) if ut0 else '—'}</td><td>{vs_mkt_icon}</td><td>{vs_ut0_icon}</td><td>{estado}</td></tr>"
-    st.markdown(f"""<table class="styled"><thead><tr><th>Producto</th><th style="color:{C['cyan']}">PERU FROST</th><th>$TM Mercado</th><th style="color:{C['orange']}">UT0</th><th>vs Mercado</th><th>vs UT0</th><th>Estado</th></tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
+        rows_html += f"<tr><td>{prod}</td><td style='color:{C['cyan']};font-weight:700;'>{fmt_usd(pf_utm) if pf_utm else '—'}</td><td>{fmt_usd(mkt_utm) if mkt_utm else '—'}</td><td style='color:{C['orange']};font-weight:700;'>{fmt_usd(ut0) if ut0 else '—'}</td><td>{vs_mkt_icon}</td><td>{vs_ut0_icon}</td><td>{estado}</td><td style='color:{C['muted']};'>{pf_pct_tm:.1f}%</td></tr>"
+    st.markdown(f"""<table class="styled"><thead><tr><th>Producto</th><th style="color:{C['cyan']}">PF ($TM)</th><th>$TM Mercado</th><th style="color:{C['orange']}">UT0</th><th>vs Mercado</th><th>vs UT0</th><th>Estado</th><th>% Part.</th></tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Executive note
@@ -1036,6 +1045,8 @@ with tab4:
     build_ranking_table(df_rank_cocido, "🔥 Top 15 Exportadores — Productos Cocidos (Alas Cocidas, Filete Cocido)")
 
 # ═══════════════ TAB 5: PRECIOS & UT0 ═══════════════════════
+# (Assuming tab4 logic is between 938 and 1044, I'll need to read it or use a separate chunk if it exists)
+# ═══════════════ TAB 5: PRECIOS & UT0 ═══════════════════════
 with tab5:
     st.markdown('<div class="section-title">Análisis de Precios & Precio de Equilibrio (UT0)</div>', unsafe_allow_html=True)
 
@@ -1102,6 +1113,84 @@ with tab5:
         st.plotly_chart(fig_exp, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
+        # NEW: Scatter Plot Vol/Precio con Tendencia y UT0 Real
+        st.markdown('<div class="card-container">', unsafe_allow_html=True)
+        st.markdown(f'<b style="color:{C["white"]};">Análisis de Competitividad: Volumen vs Precio — {selected_prod} (Top 15 + PF)</b>', unsafe_allow_html=True)
+        st.markdown(f'<div style="color:{C["muted"]}; font-size:0.8rem; margin-bottom:15px;">La <b>Línea de Tendencia</b> representa el precio promedio del mercado según el volumen. Se muestran los 15 mayores exportadores por volumen.</div>', unsafe_allow_html=True)
+        
+        # Preparamos datos por exportador para el scatter
+        exp_scatter = prod_data.groupby('Exportador').agg({
+            'U$ FOB Tot':'sum', 
+            'Kg Neto':'sum'
+        }).reset_index()
+        exp_scatter['TM'] = exp_scatter['Kg Neto'] / 1000
+        exp_scatter['USD_TM'] = (exp_scatter['U$ FOB Tot'] / exp_scatter['Kg Neto'] * 1000).fillna(0)
+        exp_scatter = exp_scatter[exp_scatter['TM'] > 0]
+
+        # Filtrar solo Top 15 por Volumen (TM) asegurando que PERU FROST esté incluido
+        top_15_exporters = exp_scatter.sort_values('TM', ascending=False).head(15)['Exportador'].tolist()
+        pf_name_found = next((e for e in exp_scatter['Exportador'] if is_pf(e)), None)
+        if pf_name_found and pf_name_found not in top_15_exporters:
+            top_15_exporters.append(pf_name_found)
+        
+        exp_scatter = exp_scatter[exp_scatter['Exportador'].isin(top_15_exporters)].sort_values('TM')
+        
+        # 1. Calcular Línea de Tendencia (Regresión Lineal)
+        trend_applied = False
+        if len(exp_scatter) > 1:
+            try:
+                from scipy import stats
+                slope, intercept, r_value, p_value, std_err = stats.linregress(exp_scatter['TM'], exp_scatter['USD_TM'])
+                line_x = exp_scatter['TM']
+                line_y = slope * line_x + intercept
+                trend_applied = True
+            except: pass
+        
+        fig_scatter = px.scatter(
+            exp_scatter, 
+            x='TM', 
+            y='USD_TM', 
+            size='U$ FOB Tot', 
+            color='Exportador',
+            hover_name='Exportador',
+            text='Exportador',
+            color_discrete_sequence=px.colors.qualitative.Safe,
+            labels={'TM': 'Volumen (TM)', 'USD_TM': 'Precio (USD/TM)'}
+        )
+
+        if trend_applied:
+            fig_scatter.add_trace(go.Scatter(
+                x=line_x, y=line_y, mode='lines', name='Tendencia Mercado',
+                line=dict(color='rgba(255,255,255,0.3)', width=2, dash='dash'),
+                hovertemplate="Precio Esperado: $ %{y:,.0f}<extra></extra>"
+            ))
+
+        
+        # Highlight PF
+        for i, row in exp_scatter.iterrows():
+            if is_pf(row['Exportador']):
+                fig_scatter.add_annotation(
+                    x=row['TM'], y=row['USD_TM'],
+                    text="📍 MI POSICIÓN",
+                    showarrow=True, arrowhead=2,
+                    arrowcolor=C['cyan'], bordercolor=C['cyan'],
+                    bgcolor=C['bg'], font=dict(color=C['cyan'], weight='bold', size=12)
+                )
+
+        fig_scatter.update_traces(
+            textposition='top center',
+            hovertemplate="<b>%{hovertext}</b><br>Volumen: %{x:,.1f} TM<br>Precio: %{y:$,.0f}<br>Total FOB: %{marker.size:$,.0f}<extra></extra>"
+        )
+        fig_scatter.update_layout(
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
+            margin=dict(l=0,r=0,t=10,b=50), height=500,
+            xaxis=dict(title='Volumen Total (TM)', gridcolor='rgba(30,58,95,0.27)'),
+            yaxis=dict(title='Precio Promedio (USD/TM)', gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'),
+            showlegend=False
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
     # Comparative all products
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
     st.markdown(f'<b style="color:{C["white"]};">Comparativo UT0 vs PERU FROST vs Mercado — Todos los Productos</b>', unsafe_allow_html=True)
@@ -1127,6 +1216,7 @@ with tab5:
         yaxis=dict(gridcolor='rgba(30,58,95,0.27)', tickformat='$,.0f'))
     st.plotly_chart(fig_all, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
+
 
 # ═══════════════ TAB 6: HISTÓRICO 12M ═══════════════════════
 with tab6:
@@ -1557,32 +1647,50 @@ with tab10:
             <div class="kpi-card c4"><div class="kpi-label">MARGEN NETO</div><div class="kpi-value">{total_mg_neto:.1f}%</div><div class="kpi-sub">{'🟢' if total_mg_neto > 0 else '🔴'} Ponderado</div></div>
         </div>""", unsafe_allow_html=True)
 
-        # ── Análisis Detallado Mensual (Petición Usuario) ──
+        # ── Análisis Triple Entrada (Invertible) ──
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
-        st.markdown(f'<b style="color:{C["white"]}; font-size:1.1rem;">Rentabilidad Mensual Detallada</b>', unsafe_allow_html=True)
-        st.markdown(f'<div style="color:{C["muted"]}; font-size:0.8rem; margin-bottom:15px;">Seleccione un cliente para ver el desglose mensual de CFR, Utilidad y Margen Bruto por producto.</div>', unsafe_allow_html=True)
+        st.markdown(f'<b style="color:{C["white"]}; font-size:1.1rem;">Análisis de Rentabilidad Multi-Dimensión</b>', unsafe_allow_html=True)
         
-        all_clients_list = sorted([str(c) for c in df_rent['Cliente'].dropna().unique()])
-        sel_client = st.selectbox("👤 Seleccionar Cliente para filtrar tabla", ["TODOS"] + all_clients_list, key="sel_cli_rent_det")
-        
+        # Triple Filtro
+        fcol1, fcol2, fcol3 = st.columns(3)
+        with fcol1:
+            paises_all = sorted([str(p) for p in df_rent['Pais'].dropna().unique()])
+            sel_paises = st.multiselect("🌍 Filtrar Países", paises_all, default=[], key="mf_pais")
+        with fcol2:
+            prods_all = sorted([str(p) for p in df_rent['Producto'].dropna().unique()])
+            sel_prods = st.multiselect("📦 Filtrar Productos", prods_all, default=[], key="mf_prod")
+        with fcol3:
+            clis_all = sorted([str(c) for c in df_rent['Cliente'].dropna().unique()])
+            sel_clis = st.multiselect("👤 Filtrar Clientes", clis_all, default=[], key="mf_cli")
+
+        # Aplicar filtros cruzados
         df_det = df_rent.copy()
-        if sel_client != "TODOS":
-            df_det = df_det[df_det['Cliente'] == sel_client]
-            
+        if sel_paises: df_det = df_det[df_det['Pais'].isin(sel_paises)]
+        if sel_prods:  df_det = df_det[df_det['Producto'].isin(sel_prods)]
+        if sel_clis:   df_det = df_det[df_det['Cliente'].isin(sel_clis)]
+        
+        # Selector de Eje de Fila
+        st.markdown("---")
+        col_focus, col_info = st.columns([1, 2])
+        with col_focus:
+            row_dim = st.radio("🎯 Ver filas por:", ["Producto", "Cliente", "Pais"], horizontal=True, key="row_dim_focus")
+        
+        with col_info:
+            st.markdown(f'<div style="color:{C["muted"]}; font-size:0.8rem; margin-top:10px;">La tabla muestra el desempeño mensual consolidado según los filtros aplicados arriba.</div>', unsafe_allow_html=True)
+
         if not df_det.empty and 'Fecha Embarque' in df_det.columns:
-            # Asegurar que Fecha Embarque sea datetime
             df_det['Fecha Embarque'] = pd.to_datetime(df_det['Fecha Embarque'], errors='coerce')
             df_det = df_det[df_det['Fecha Embarque'].notna()]
             df_det['Mes_N'] = df_det['Fecha Embarque'].dt.month
             meses_activos = sorted(df_det['Mes_N'].unique().tolist())
             meses_nombres = {1:'Ene', 2:'Feb', 3:'Mar', 4:'Abr', 5:'May', 6:'Jun', 7:'Jul', 8:'Ago', 9:'Sep', 10:'Oct', 11:'Nov', 12:'Dic'}
             
-            prods_det = sorted([str(p) for p in df_det['Producto'].dropna().unique()])
+            items_to_show = sorted([str(i) for i in df_det[row_dim].dropna().unique()])
             
-            # Cabecera con 2 niveles: Mes arriba (colspan 3) y métricas abajo
-            header_html = f"<tr><th rowspan='2' style='background:{C['card2']}; position:sticky; left:0; z-index:3; vertical-align:middle; border-right: 1px solid {C['border']}66;'>Producto</th>"
+            header_html = f"<tr><th rowspan='2' style='background:{C['card2']}; position:sticky; left:0; z-index:3; vertical-align:middle; border-right: 1px solid {C['border']}66;'>{row_dim.upper()}</th>"
             for m in meses_activos:
                 header_html += f"<th colspan='3' style='text-align:center; background:{C['card2']}; border-bottom:1px solid {C['border']}66; border-right: 1px solid {C['border']}33;'>{meses_nombres.get(m, m).upper()}</th>"
+            header_html += f"<th colspan='3' style='text-align:center; background:{C['card2']}; color:{C['cyan']}; border-bottom:1px solid {C['border']}66; border-right: 1px solid {C['border']}33;'>TOTAL ACUM.</th>"
             header_html += "</tr>"
             
             header_html += "<tr>"
@@ -1590,16 +1698,23 @@ with tab10:
                 header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}11;'>CFR</th>"
                 header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}11;'>UTIL</th>"
                 header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}33;'>MG</th>"
+            header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}11;'>TOT CFR</th>"
+            header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['muted']}; border-right: 1px solid {C['border']}11;'>TOT UTIL</th>"
+            header_html += f"<th style='text-align:center; background:{C['card2']}; font-size:0.6rem; color:{C['cyan']}; border-right: 1px solid {C['border']}33;'>MG TOTAL</th>"
             header_html += "</tr>"
             
             rows_html_det = ""
-            for p in prods_det:
-                row_html = f"<tr><td style='font-weight:700; color:{C['white']}; border-right: 1px solid {C['border']}66; position:sticky; left:0; background:{C['card']}; z-index:1;'>{p}</td>"
+            for item in items_to_show:
+                row_html = f"<tr><td style='font-weight:700; color:{C['white']}; border-right: 1px solid {C['border']}66; position:sticky; left:0; background:{C['card']}; z-index:1;'>{item}</td>"
+                tot_cfr = 0
+                tot_util = 0
                 for m in meses_activos:
-                    sub = df_det[(df_det['Producto'] == p) & (df_det['Mes_N'] == m)]
+                    sub = df_det[(df_det[row_dim] == item) & (df_det['Mes_N'] == m)]
                     if not sub.empty:
                         c_val = sub['VALOR CFR'].sum()
                         u_val = sub['UTILIDAD NETA'].sum()
+                        tot_cfr += c_val
+                        tot_util += u_val
                         m_val = (u_val / c_val) if c_val > 0 else 0
                         m_col = C['green'] if m_val > 0 else (C['red'] if m_val < 0 else C['muted'])
                         
@@ -1610,6 +1725,14 @@ with tab10:
                         row_html += f"<td style='text-align:center; color:#333; border-right: 1px solid {C['border']}11;'>—</td>"
                         row_html += f"<td style='text-align:center; color:#333; border-right: 1px solid {C['border']}11;'>—</td>"
                         row_html += f"<td style='text-align:center; color:#333; border-right: 1px solid {C['border']}33;'>—</td>"
+                
+                # Totales finales por fila
+                tot_mg = (tot_util / tot_cfr * 100) if tot_cfr > 0 else 0
+                tot_mg_col = C['green'] if tot_mg > 0 else (C['red'] if tot_mg < 0 else C['muted'])
+                row_html += f"<td style='text-align:right; font-size:0.75rem; font-weight:700; background:rgba(0,212,170,0.05); color:{C['cyan']}; border-right: 1px solid {C['border']}11;'>{fmt_usd(tot_cfr)}</td>"
+                row_html += f"<td style='text-align:right; font-size:0.75rem; font-weight:700; background:rgba(0,212,170,0.05); color:{C['white']}; border-right: 1px solid {C['border']}11;'>{fmt_usd(tot_util)}</td>"
+                row_html += f"<td style='text-align:center; font-size:0.75rem; font-weight:800; background:rgba(0,212,170,0.1); color:{tot_mg_col}; border-right: 1px solid {C['border']}33;'>{tot_mg:.1f}%</td>"
+                
                 row_html += "</tr>"
                 rows_html_det += row_html
                 
@@ -1629,26 +1752,75 @@ with tab10:
         df_final_prod = df_td_prod.copy()
         df_final_prod.rename(columns={'Producto_TD': 'Producto'}, inplace=True)
 
-        # Table
+        # ── Análisis Winner / Loser ──
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
-        st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">Rentabilidad por Producto</b>', unsafe_allow_html=True)
-        rows_rent = ""
-        for _, r in df_final_prod.sort_values('Venta_CFR', ascending=False).iterrows():
-            prod = str(r['Producto'])[:30]
+        st.markdown(f'<b style="color:{C["white"]}; font-size:1.1rem;">Análisis Winner / Loser</b>', unsafe_allow_html=True)
+        st.markdown(f'<div style="color:{C["muted"]}; font-size:0.8rem; margin-bottom:15px;">Clasificación de productos basada en volumen (TM) y rentabilidad (Margen Neto).</div>', unsafe_allow_html=True)
+        
+        # Preparar datos para Winner/Loser
+        df_wl = df_final_prod.copy()
+        total_tm_wl = df_wl['TM_Vendidas'].sum()
+        
+        # Definir cuadrantes
+        tm_median = df_wl['TM_Vendidas'].median()
+        target_mg = 10.0
+        
+        rows_wl = ""
+        for _, r in df_wl.sort_values('Util_Neta', ascending=False).iterrows():
+            tm = r['TM_Vendidas']
+            pct_tm = (tm / total_tm_wl * 100) if total_tm_wl > 0 else 0
             mg = r['MG_Neto']
-            mg_color = C['green'] if mg > 0 else C['red']
-            u_color = C['green'] if r['Util_Neta'] > 0 else C['red']
-            if mg > 15:
-                clase = f'<span class="badge badge-green">Estrella</span>'
-            elif mg > 0:
-                clase = f'<span style="color:{C["orange"]}">Moderado</span>'
+            prod = str(r['Producto'])
+            
+            if mg > target_mg and tm > tm_median:
+                cat = "🏆 WINNER"
+                cat_col = C['green']
+                cat_bg = C['green'] + "22"
+            elif mg < 0:
+                cat = "💀 LOSER"
+                cat_col = C['red']
+                cat_bg = C['red'] + "22"
+            elif mg < target_mg and tm > tm_median:
+                cat = "⚠️ BAJO MARGEN"
+                cat_col = C['orange']
+                cat_bg = C['orange'] + "22"
+            elif mg > target_mg:
+                cat = "💎 NICHO"
+                cat_col = C['cyan']
+                cat_bg = C['cyan'] + "22"
             else:
-                clase = f'<span class="badge badge-red">Crítico</span>'
-            u_ene = f'${r["Util_Ene"]:,.0f}' if r['Util_Ene'] != 0 else '—'
-            u_feb = f'${r["Util_Feb"]:,.0f}' if r['Util_Feb'] != 0 else '—'
-            u_mar = f'${r["Util_Mar"]:,.0f}' if r['Util_Mar'] != 0 else '—'
-            rows_rent += f'<tr><td>{prod}</td><td style="color:{C["cyan"]};font-weight:700;">{r["TM_Vendidas"]:,.1f}</td><td>{fmt_usd(r["Venta_CFR"])}</td><td>{u_ene}</td><td>{u_feb}</td><td>{u_mar}</td><td style="color:{u_color};font-weight:700;">{fmt_usd(r["Util_Neta"])}</td><td style="color:{mg_color};font-weight:700;">{mg:.1f}%</td><td>{clase}</td></tr>'
-        st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="color:{C["cyan"]}">TM</th><th>Venta CFR</th><th>Util. Ene</th><th>Util. Feb</th><th>Util. Mar</th><th>Utilidad Neta</th><th>Margen</th><th>Tipo</th></tr>{rows_rent}</table>', unsafe_allow_html=True)
+                cat = "⚖️ REGULAR"
+                cat_col = C['muted']
+                cat_bg = C['muted'] + "22"
+                
+            rows_wl += f"""
+            <tr>
+                <td style="font-weight:700;">{prod}</td>
+                <td style="text-align:right; font-weight:700;">{tm:,.1f} <span style="color:{C['muted']}; font-weight:400; font-size:0.7rem;">({pct_tm:.1f}%)</span></td>
+                <td style="text-align:right; color:{C['cyan']}; font-weight:700;">{fmt_usd(r['Venta_CFR'])}</td>
+                <td style="text-align:right; color:{C['white']}; font-weight:700;">{fmt_usd(r['Util_Neta'])}</td>
+                <td style="text-align:center; color:{cat_col}; font-weight:800;">{mg:.1f}%</td>
+                <td style="text-align:center;">
+                    <span style="background:{cat_bg}; color:{cat_col}; padding:4px 10px; border-radius:12px; font-size:0.7rem; font-weight:800;">{cat}</span>
+                </td>
+            </tr>
+            """
+            
+        st.markdown(f"""
+            <table class="styled">
+                <thead>
+                    <tr>
+                        <th>Producto</th>
+                        <th style="text-align:right;">Volumen (% Total)</th>
+                        <th style="text-align:right;">Venta CFR</th>
+                        <th style="text-align:right;">Utilidad Neta</th>
+                        <th style="text-align:center;">Margen %</th>
+                        <th style="text-align:center;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>{rows_wl}</tbody>
+            </table>
+        """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         # ── Horizontal bar chart: Product profitability ──
@@ -1764,8 +1936,9 @@ with tab11:
         pf_utm = pf_p['U$ FOB Tot'].sum()/pf_p['Kg Neto'].sum()*1000 if pf_p['Kg Neto'].sum()>0 else 0
         mkt_utm = all_p['U$ FOB Tot'].sum()/all_p['Kg Neto'].sum()*1000 if all_p['Kg Neto'].sum()>0 else 0
         
-        # UT0 ESTÁTICO (CORRECCIÓN)
+        # UT0 ESTÁTICO (REVERTIDO)
         ut0 = UT0_FIXED.get(prod)
+        if prod == "REPRODUCTOR": ut0 = UT0_FIXED.get("REPRODUCTOR")
         vs_mkt = pf_utm - mkt_utm
         
         # Ranking
