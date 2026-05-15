@@ -2035,6 +2035,9 @@ with tab11:
 # ═══════════════ TAB COMEX: CONTROL DOCUMENTAL ══════════════
 with tab10_comex:
     TODAY_C = datetime.now().date()
+    # Calcular avance esperado del mes
+    _, days_in_month = calendar.monthrange(TODAY_C.year, TODAY_C.month)
+    pct_esperado = (TODAY_C.day / days_in_month) * 100
 
     # ─── Static Goals ───────────────────────────────────────────
     # Vol: Meta 1914 TM, Avance 3081.82 TM
@@ -2049,9 +2052,13 @@ with tab10_comex:
     
     # 1. Tracker Volumen
     pct_vol = (avance_vol / meta_vol) * 100
-    status_vol = "SOBRE LO ESPERADO" if pct_vol >= 100 else "EN PROGRESO"
-    status_ico_vol = "📈" if pct_vol >= 100 else "⏳"
-    status_col_vol = C['green'] if pct_vol >= 100 else C['yellow']
+    status_vol = "SOBRE LO ESPERADO" if pct_vol >= pct_esperado else "BAJO LO ESPERADO"
+    if pct_vol >= 100: status_vol = "META CUMPLIDA"
+    
+    status_ico_vol = "📈" if pct_vol >= pct_esperado else "⚠️"
+    if pct_vol >= 100: status_ico_vol = "🏆"
+    
+    status_col_vol = C['green'] if pct_vol >= pct_esperado else C['orange']
     
     gcol1.markdown(f"""
     <div class="meta-container">
@@ -2069,16 +2076,20 @@ with tab10_comex:
         </div>
         <div class="meta-footer">
             <div class="meta-pct-real">AVANCE REAL: {pct_vol:.1f}%</div>
-            <div class="meta-pct-exp">AVANCE ESPERADO (AL DÍA): 80.0%</div>
+            <div class="meta-pct-exp">AVANCE ESPERADO (AL DÍA): {pct_esperado:.1f}%</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
     # 2. Tracker FOB
     pct_fob = (avance_fob / meta_fob) * 100
-    status_fob = "SOBRE LO ESPERADO" if pct_fob >= 100 else "EN PROGRESO"
-    status_ico_fob = "💰" if pct_fob >= 100 else "⏳"
-    status_col_fob = C['green'] if pct_fob >= 100 else C['yellow']
+    status_fob = "SOBRE LO ESPERADO" if pct_fob >= pct_esperado else "BAJO LO ESPERADO"
+    if pct_fob >= 100: status_fob = "META CUMPLIDA"
+    
+    status_ico_fob = "💰" if pct_fob >= pct_esperado else "⚠️"
+    if pct_fob >= 100: status_ico_fob = "🏆"
+    
+    status_col_fob = C['green'] if pct_fob >= pct_esperado else C['orange']
     
     gcol2.markdown(f"""
     <div class="meta-container" style="border-color:{C['blue']};">
@@ -2096,7 +2107,7 @@ with tab10_comex:
         </div>
         <div class="meta-footer">
             <div class="meta-pct-real" style="color:{C['blue']}">AVANCE REAL: {pct_fob:.1f}%</div>
-            <div class="meta-pct-exp">AVANCE ESPERADO (AL DÍA): 80.0%</div>
+            <div class="meta-pct-exp">AVANCE ESPERADO (AL DÍA): {pct_esperado:.1f}%</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -2341,7 +2352,7 @@ with tab10_comex:
         # bl sanit fact co cc iv otros (otros es columna Q -> 'orig')
         DOCS_LIST = [
             ('bl','BL'), ('sanit','SANITARIO'), ('fact','FACTURA'),
-            ('co','C. ORIGEN'), ('cc','COPIA CERT.'), ('iv','INSPEC. VET.'),
+            ('co','C. ORIGEN'), ('cc','COPIA CERT.'), ('iv','ANEXO 4'),
             ('orig','OTROS (Q)')
         ]
 
@@ -2409,7 +2420,7 @@ with tab10_comex:
 
                     with st.expander(f"DETALLE {fp['fp']}", expanded=False):
                         # Mini Cards
-                        mk1, mk2, mk3, mk4 = st.columns(4)
+                        mk1, mk2, mk3, mk4, mk5 = st.columns(5)
                         
                         # 1. Volumen
                         mk1.markdown(f"""
@@ -2418,26 +2429,32 @@ with tab10_comex:
                           <div style="color:{C['white']};font-size:1.4rem;font-weight:900;margin-top:4px;">{len(fp['contenedores'])} <span style="font-size:0.75rem;opacity:0.6;">CNTR</span></div>
                         </div>""", unsafe_allow_html=True)
                         
-                        # 2. DRAFT - Especial
-                        d_st = fp['docs'].get('draft', 'pendiente')
-                        d_raw = fp['docs'].get('draft_raw', '—')
-                        d_col = DOC_PIX[d_st]['color']
+                        # 2. Zarpe
+                        z_date = fp['zarpe'].strftime('%d/%m/%Y') if pd.notna(fp['zarpe']) and hasattr(fp['zarpe'], 'strftime') else '—'
                         mk2.markdown(f"""
-                        <div style="background:{C['card2']};border:1px solid {C['border']};border-radius:10px;padding:15px;border-bottom:3px solid {d_col};">
-                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">FECHA DRAFT</div>
-                          <div style="color:{d_col};font-size:1.2rem;font-weight:900;margin-top:4px;">{d_raw.upper()}</div>
+                        <div style="background:{C['card2']};border:1px solid {C['border']};border-radius:10px;padding:15px;">
+                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">ZARPE</div>
+                          <div style="color:{C['yellow']};font-size:1.1rem;font-weight:900;margin-top:4px;">{z_date}</div>
                         </div>""", unsafe_allow_html=True)
 
-                        # 3. Avance
+                        # 3. Llegada
+                        l_date = fp['llegada'].strftime('%d/%m/%Y') if pd.notna(fp['llegada']) and hasattr(fp['llegada'], 'strftime') else '—'
                         mk3.markdown(f"""
                         <div style="background:{C['card2']};border:1px solid {C['border']};border-radius:10px;padding:15px;">
-                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">AVANCE CARPETA</div>
-                          <div style="color:{C['cyan']};font-size:1.4rem;font-weight:900;margin-top:4px;">{pct}%</div>
+                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">LLEGADA</div>
+                          <div style="color:{C['cyan']};font-size:1.1rem;font-weight:900;margin-top:4px;">{l_date}</div>
                         </div>""", unsafe_allow_html=True)
 
-                        # 4. ETA / Riesgo
-                        r_col = riesgo['color']
+                        # 4. Avance
                         mk4.markdown(f"""
+                        <div style="background:{C['card2']};border:1px solid {C['border']};border-radius:10px;padding:15px;">
+                          <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">AVANCE CARPETA</div>
+                          <div style="color:{C['white']};font-size:1.4rem;font-weight:900;margin-top:4px;">{pct}%</div>
+                        </div>""", unsafe_allow_html=True)
+
+                        # 5. ETA / Riesgo
+                        r_col = riesgo['color']
+                        mk5.markdown(f"""
                         <div style="background:{riesgo['bg']};border:1px solid {riesgo['border']};border-radius:10px;padding:15px;">
                           <div style="color:{C['muted']};font-size:0.6rem;font-weight:800;letter-spacing:1px;">ESTATUS RIESGO</div>
                           <div style="color:{r_col};font-size:1rem;font-weight:900;margin-top:4px;text-transform:uppercase;">{riesgo['label']}</div>
