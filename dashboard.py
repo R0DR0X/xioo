@@ -2040,10 +2040,10 @@ with tab10_comex:
     # Vol: Meta 1914 TM, Avance 3081.82 TM
     # FOB: Meta 4.4M, Avance 7,441,832 USD
     
-    meta_vol = 1914.0
-    avance_vol = 3081.82
+    meta_vol = 1800.0
+    avance_vol = 2554.25
     meta_fob = 4400000.0
-    avance_fob = 7441832.0
+    avance_fob = 6634187.50
 
     gcol1, gcol2 = st.columns(2)
     
@@ -2196,7 +2196,7 @@ with tab10_comex:
         
         df_counts = pd.DataFrame({
             'Mes': ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo'],
-            'Cantidad': [10, 21, 36, 55, 3]
+            'Cantidad': [9, 21, 36, 38, 47]
         })
 
         fig_ship = px.line(df_counts, x='Mes', y='Cantidad', markers=True,
