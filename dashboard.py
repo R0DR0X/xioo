@@ -624,6 +624,27 @@ def load_comex_docs():
     except Exception as e:
         return [], str(e)
 
+def load_resumen_ov():
+    """Lee el archivo RESUMEN OV - PRODUCCIÓN.xlsx en INPUT/"""
+    base_dir = os.path.dirname(__file__)
+    input_dir = os.path.join(base_dir, "INPUT")
+    path = os.path.join(input_dir, "RESUMEN OV - PRODUCCIÓN.xlsx")
+    
+    if not os.path.exists(path):
+        return None
+    
+    try:
+        df = pd.read_excel(path, header=2)
+        # Limpiar nombres de columnas (quitar espacios, etc.)
+        df.columns = [str(c).strip() for c in df.columns]
+        # Manejar el nombre específico 'N° FCL' que tiene un espacio en el Excel
+        if 'N° FCL' in df.columns:
+            df.rename(columns={'N° FCL': 'NFLC'}, inplace=True)
+        return df
+    except Exception as e:
+        print(f"Error loading RESUMEN OV: {e}")
+        return None
+
 @st.cache_data
 def get_manual_summary(df, group_col):
     if df.empty: 
@@ -2193,6 +2214,108 @@ with tab10_comex:
         )
         st.plotly_chart(fig_ship, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
+        # ─── TABLA RESUMEN OV ─────────────────────────────────────
+        df_ov = load_resumen_ov()
+        if df_ov is not None and not df_ov.empty:
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<div style="color:{C["white"]}; font-size:1.1rem; font-weight:800; margin-bottom:15px;">📋 RESUMEN DE ORDENES DE VENTA (OV)</div>', unsafe_allow_html=True)
+            
+            # Filtrar filas vacías o de total antes de calcular
+            df_ov_filt = df_ov[df_ov['FP'].notna() & (df_ov['FP'] != '') & (df_ov['ESTADO'] != 'Total general')].copy()
+            
+            # Cálculos para tarjetas resumen
+            df_ov_filt['TN'] = pd.to_numeric(df_ov_filt['TN'], errors='coerce').fillna(0)
+            df_ov_filt['NFLC'] = pd.to_numeric(df_ov_filt['NFLC'], errors='coerce').fillna(0)
+            df_ov_filt['FECHA_DT'] = pd.to_datetime(df_ov_filt['FECHA RESERVA'], errors='coerce').dt.date
+            today_dt = datetime.now().date()
+            
+            # 1. AMARILLO: PACKING (que no sea de hoy)
+            a_mask = (df_ov_filt['ESTADO'].str.upper() == 'PACKING') & (df_ov_filt['FECHA_DT'] != today_dt)
+            a_tn, a_cntr = df_ov_filt[a_mask]['TN'].sum(), df_ov_filt[a_mask]['NFLC'].sum()
+            
+            # 2. NARANJA: PENDIENTE (POR COMPLETAR)
+            n_mask = (df_ov_filt['ESTADO'].str.upper() == 'PENDIENTE')
+            n_tn, n_cntr = df_ov_filt[n_mask]['TN'].sum(), df_ov_filt[n_mask]['NFLC'].sum()
+            
+            # 3. CELESTE: PACKING CREADO HOY (POR RESERVA)
+            c_mask = (df_ov_filt['ESTADO'].str.upper() == 'PACKING') & (df_ov_filt['FECHA_DT'] == today_dt)
+            c_tn, c_cntr = df_ov_filt[c_mask]['TN'].sum(), df_ov_filt[c_mask]['NFLC'].sum()
+
+            st.markdown(f"""<div class="kpi-row">
+<div class="kpi-card" style="background:{C['card']}; border-left:5px solid #fcd34d;">
+    <div class="kpi-label" style="color:#fcd34d;">PACKING CON RESERVA</div>
+    <div class="kpi-value">{a_tn:,.1f} <span style="font-size:0.8rem; opacity:0.6;">TM</span></div>
+    <div class="kpi-sub">{a_cntr:,.0f} CONTENEDORES</div>
+</div>
+<div class="kpi-card" style="background:{C['card']}; border-left:5px solid #fb923c;">
+    <div class="kpi-label" style="color:#fb923c;">PENDIENTE (POR COMPLETAR)</div>
+    <div class="kpi-value">{n_tn:,.1f} <span style="font-size:0.8rem; opacity:0.6;">TM</span></div>
+    <div class="kpi-sub">{n_cntr:,.0f} CONTENEDORES</div>
+</div>
+<div class="kpi-card" style="background:{C['card']}; border-left:5px solid #38bdf8;">
+    <div class="kpi-label" style="color:#38bdf8;">CREADO HOY (CON RESERVA)</div>
+    <div class="kpi-value">{c_tn:,.1f} <span style="font-size:0.8rem; opacity:0.6;">TM</span></div>
+    <div class="kpi-sub">{c_cntr:,.0f} CONTENEDORES</div>
+</div>
+</div>""", unsafe_allow_html=True)
+
+            rows_ov = ""
+            # Filtrar filas vacías o de total
+            df_ov_filt = df_ov_filt[df_ov_filt['FP'].notna() & (df_ov_filt['FP'] != '')].copy()
+            
+            for _, r in df_ov_filt.iterrows():
+                estado = str(r.get('ESTADO', '')).upper()
+                booking = str(r.get('BOOKING', '')).strip()
+                f_reserva = r.get('FECHA RESERVA')
+                
+                # Logic for colors
+                bg_color = "transparent"
+                border_l = "transparent"
+                
+                # Check if it's today
+                is_today = False
+                if pd.notna(f_reserva) and hasattr(f_reserva, 'date'):
+                    if f_reserva.date() == today_dt:
+                        is_today = True
+                
+                is_celeste = (estado == 'PACKING') and is_today
+                
+                if estado == 'PENDIENTE':
+                    bg_color = "#fb923c22" # Naranja suave
+                    border_l = "#fb923c"
+                elif is_celeste:
+                    bg_color = "#38bdf822" # Celeste suave
+                    border_l = "#38bdf8"
+                elif estado == 'PACKING':
+                    bg_color = "#fcd34d22" # Amarillo suave
+                    border_l = "#fcd34d"
+
+                rows_ov += f"""<tr style="background:{bg_color}; border-left: 4px solid {border_l};">
+<td style="font-weight:700; font-size:0.8rem;">{estado}</td>
+<td style="font-weight:800; color:{C['cyan']};">{r.get('FP', '')}</td>
+<td style="font-size:0.8rem;">{r.get('PAÍS', '')}</td>
+<td style="font-size:0.8rem;">{r.get('CLIENTE', '')}</td>
+<td style="text-align:center; font-weight:700;">{r.get('NFLC', r.get('N° FCL', ''))}</td>
+<td style="text-align:right; font-weight:800; color:{C['white']};">{r.get('TN', ''):,.1f}</td>
+</tr>"""
+            
+            st.markdown(f"""<div style="overflow-x:auto;">
+<table class="styled" style="width:100%;">
+<thead>
+<tr>
+<th>ESTADO</th>
+<th>FP</th>
+<th>PAÍS</th>
+<th>CLIENTE</th>
+<th>NFLC</th>
+<th style="text-align:right;">TN</th>
+</tr>
+</thead>
+<tbody>{rows_ov}</tbody>
+</table>
+</div>""", unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         # ─── Monitor Integral ─────────────────────────────────────
         st.markdown(f"""
