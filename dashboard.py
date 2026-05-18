@@ -1139,8 +1139,21 @@ with tab5:
         st.markdown(f'<b style="color:{C["white"]};">Análisis de Competitividad: Volumen vs Precio — {selected_prod} (Top 15 + PF)</b>', unsafe_allow_html=True)
         st.markdown(f'<div style="color:{C["muted"]}; font-size:0.8rem; margin-bottom:15px;">La <b>Línea de Tendencia</b> representa el precio promedio del mercado según el volumen. Se muestran los 15 mayores exportadores por volumen.</div>', unsafe_allow_html=True)
         
+        # Filtro por País para el gráfico de dispersión
+        all_countries_scatter = sorted([str(c) for c in prod_data['Pais de Destino'].dropna().unique()])
+        selected_countries_scatter = st.multiselect(
+            "🌍 Filtrar por País de Destino", 
+            options=all_countries_scatter, 
+            default=[], 
+            key=f"scatter_country_filter_{selected_prod}"
+        )
+        
+        scatter_data = prod_data.copy()
+        if selected_countries_scatter:
+            scatter_data = scatter_data[scatter_data['Pais de Destino'].isin(selected_countries_scatter)]
+
         # Preparamos datos por exportador para el scatter
-        exp_scatter = prod_data.groupby('Exportador').agg({
+        exp_scatter = scatter_data.groupby('Exportador').agg({
             'U$ FOB Tot':'sum', 
             'Kg Neto':'sum'
         }).reset_index()
