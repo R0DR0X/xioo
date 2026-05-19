@@ -1620,7 +1620,9 @@ with tab8:
             accordion_html += f'</table></div></div>'
             
         accordion_html += '</div>'
-        st.markdown(accordion_html, unsafe_allow_html=True)# ═══════════════ TAB 9: INVENTARIO ══════════════════════════
+        st.markdown(accordion_html, unsafe_allow_html=True)
+"""   
+# ═══════════════ TAB 9: INVENTARIO ══════════════════════════
 with tab9:
     st.markdown('<div class="section-title">Inventario de Producto Terminado</div>', unsafe_allow_html=True)
 
@@ -1657,8 +1659,8 @@ with tab9:
         st.markdown(f'<table class="styled"><tr><th>Cód. SAP</th><th>Material</th><th>Stock Inicial (TM)</th><th style="color:{C["green"]}">Ingresos (TM)</th><th style="color:{C["red"]}">Salidas (TM)</th><th style="color:{C["cyan"]}">Stock Final (TM)</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.warning("⚠️ **Inventario vacío o fórmulas no calculadas:** No se encontraron productos con stock en el mes actual. Si acabas de subir el Excel desde Drive o un software externo, **ábrelo en tu Excel de escritorio y presiona 'Guardar'**. Esto obliga a Excel a calcular las fórmulas para que el Dashboard pueda leer los valores finales.")
-
+       st.warning("⚠️ **Inventario vacío o fórmulas no calculadas:** No se encontraron productos con stock en el mes actual. Si acabas de subir el Excel desde Drive o un software externo, **ábrelo en tu Excel de escritorio y presiona 'Guardar'**. Esto obliga a Excel a calcular las fórmulas para que el Dashboard pueda leer los valores finales.")
+"""
 
 
 # ═══════════════ TAB 10: RENTABILIDAD ═══════════════════════
