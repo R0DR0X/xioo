@@ -1621,7 +1621,7 @@ with tab8:
             
         accordion_html += '</div>'
         st.markdown(accordion_html, unsafe_allow_html=True)
-"""   
+   
 # ═══════════════ TAB 9: INVENTARIO ══════════════════════════
 with tab9:
     st.markdown('<div class="section-title">Inventario de Producto Terminado</div>', unsafe_allow_html=True)
@@ -1660,7 +1660,6 @@ with tab9:
         st.markdown('</div>', unsafe_allow_html=True)
     else:
        st.warning("⚠️ **Inventario vacío o fórmulas no calculadas:** No se encontraron productos con stock en el mes actual. Si acabas de subir el Excel desde Drive o un software externo, **ábrelo en tu Excel de escritorio y presiona 'Guardar'**. Esto obliga a Excel a calcular las fórmulas para que el Dashboard pueda leer los valores finales.")
-"""
 
 
 # ═══════════════ TAB 10: RENTABILIDAD ═══════════════════════
