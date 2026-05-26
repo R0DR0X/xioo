@@ -726,14 +726,9 @@ DEFAULT_RANGES = {
 }
 
 def apply_fob_filter(df, ranges=None):
-    """Filter rows by configurable FOB/KG ranges per product"""
-    if ranges is None:
-        ranges = DEFAULT_RANGES
-    mask = (df['PRODUCTO'].isna()) | (df['PRODUCTO']=='')
-    for prod, (lo, hi) in ranges.items():
-        # Se comenta el filtro superior (<=hi) a pedido del usuario, dejando solo el inferior
-        mask = mask | ((df['PRODUCTO']==prod) & (df['FOB_KG']>=lo)) # & (df['FOB_KG']<=hi))
-    return df[mask]
+    """Filter rows by configurable FOB/KG ranges per product (disabled - handled in filtrador)"""
+    return df
+
 
 def is_pf(name):
     return 'PERU FROST' in str(name).upper()
@@ -903,13 +898,82 @@ with tab1:
         if prod == "REPRODUCTOR": ut0 = UT0_FIXED.get("REPRODUCTOR")
         
         mkt_utm = (prod_df['U$ FOB Tot'].sum() / prod_df['Kg Neto'].sum() * 1000) if prod_df['Kg Neto'].sum()>0 else None
+        
+        # Rentabilidad calculation (PF(RL)) - Static real values for 2026 filtered by overlapping month date range
+        RL_VALUES = {
+            (2026, 1): {
+                "ALAS CONGELADAS": 1816.54,
+                "FILETE CONGELADO": 1868.63,
+                "NUCA": 1553.17,
+                "REPRODUCTOR": 2821.77,
+                "TENTACULO": 2615.48,
+            },
+            (2026, 2): {
+                "ALAS CONGELADAS": 1454.69,
+                "FILETE COCIDO": 3292.59,
+                "FILETE CONGELADO": 1353.54,
+                "NUCA": 1700.00,
+                "REPRODUCTOR": 2788.37,
+                "TENTACULO": 2523.13,
+            },
+            (2026, 3): {
+                "ALAS CONGELADAS": 1744.10,
+                "FILETE COCIDO": 3105.59,
+                "FILETE CONGELADO": 1395.94,
+                "NUCA": 1081.94,
+                "REPRODUCTOR": 2643.36,
+                "TENTACULO": 2328.64,
+            },
+            (2026, 4): {
+                "ALAS COCIDAS": 3774.76,
+                "ALAS CONGELADAS": 1831.32,
+                "FILETE COCIDO": 3659.25,
+                "FILETE CONGELADO": 1747.16,
+                "REPRODUCTOR": 2825.07,
+                "TENTACULO": 2556.57,
+            },
+            (2026, 5): {
+                "ALAS COCIDAS": 3839.77,
+                "ALAS CONGELADAS": 2020.37,
+                "FILETE COCIDO": 3751.85,
+                "FILETE CONGELADO": 1990.13,
+                "NUCA": 1108.89,
+                "REPRODUCTOR": 2875.96,
+                "TENTACULO": 2860.13,
+            }
+        }
+        
+        import datetime
+        active_months = []
+        for (yr, mth) in RL_VALUES.keys():
+            m_start = datetime.date(yr, mth, 1)
+            if mth == 12:
+                m_end = datetime.date(yr, 12, 31)
+            else:
+                m_end = datetime.date(yr, mth + 1, 1) - datetime.timedelta(days=1)
+            if max(d_start, m_start) <= min(d_end, m_end):
+                active_months.append((yr, mth))
+                
+        vals = []
+        for (yr, mth) in active_months:
+            month_data = RL_VALUES.get((yr, mth), {})
+            if prod in month_data:
+                vals.append(month_data[prod])
+        pf_rl = sum(vals) / len(vals) if vals else None
+
         vs_mkt = (pf_utm - mkt_utm) if pf_utm and mkt_utm else None
+        rl_vs_mkt = (pf_rl - mkt_utm) if pf_rl and mkt_utm else None
+        rl_pct = ((pf_rl - mkt_utm) / mkt_utm * 100) if pf_rl and mkt_utm else None
         vs_ut0 = (pf_utm - ut0) if pf_utm and ut0 else None
+        
         vs_mkt_icon = f'<span style="color:{C["green"]}">↗ +{vs_mkt:.0f}</span>' if vs_mkt and vs_mkt>=0 else (f'<span style="color:{C["red"]}">↘ {vs_mkt:.0f}</span>' if vs_mkt else "—")
+        rl_vs_mkt_icon = f'<span style="color:{C["green"]}">↗ +{rl_vs_mkt:.0f}</span>' if rl_vs_mkt and rl_vs_mkt>=0 else (f'<span style="color:{C["red"]}">↘ {rl_vs_mkt:.0f}</span>' if rl_vs_mkt else "—")
+        rl_pct_icon = f'<span style="color:{C["green"]}">+{rl_pct:.2f}%</span>' if rl_pct and rl_pct>=0 else (f'<span style="color:{C["red"]}">{rl_pct:.2f}%</span>' if rl_pct else "—")
         vs_ut0_icon = f'<span style="color:{C["green"]}">↗ +{vs_ut0:.0f}</span>' if vs_ut0 and vs_ut0>=0 else (f'<span style="color:{C["red"]}">↘ {vs_ut0:.0f}</span>' if vs_ut0 else "—")
         estado = '<span class="badge badge-green">Sobre UT0</span>' if vs_ut0 and vs_ut0>=0 else ('<span class="badge badge-red">Bajo UT0</span>' if vs_ut0 and vs_ut0<0 else '<span class="badge badge-gray">Sin referencia</span>')
-        rows_html += f"<tr><td>{prod}</td><td style='color:{C['cyan']};font-weight:700;'>{fmt_usd(pf_utm) if pf_utm else '—'}</td><td>{fmt_usd(mkt_utm) if mkt_utm else '—'}</td><td style='color:{C['orange']};font-weight:700;'>{fmt_usd(ut0) if ut0 else '—'}</td><td>{vs_mkt_icon}</td><td>{vs_ut0_icon}</td><td>{estado}</td><td style='color:{C['muted']};'>{pf_pct_tm:.1f}%</td></tr>"
-    st.markdown(f"""<table class="styled"><thead><tr><th>Producto</th><th style="color:{C['cyan']}">PF ($TM)</th><th>$TM Mercado</th><th style="color:{C['orange']}">UT0</th><th>vs Mercado</th><th>vs UT0</th><th>Estado</th><th>% Part.</th></tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
+        
+        rows_html += f"<tr><td>{prod}</td><td style='color:{C['cyan']};font-weight:700;'>{fmt_usd(pf_utm) if pf_utm else '—'}</td><td style='color:{C['purple']};font-weight:700;'>{fmt_usd(pf_rl) if pf_rl else '—'}</td><td>{fmt_usd(mkt_utm) if mkt_utm else '—'}</td><td>{vs_mkt_icon}</td><td>{rl_vs_mkt_icon}</td><td>{rl_pct_icon}</td><td style='color:{C['orange']};font-weight:700;'>{fmt_usd(ut0) if ut0 else '—'}</td><td>{vs_ut0_icon}</td><td>{estado}</td><td style='color:{C['muted']};'>{pf_pct_tm:.1f}%</td></tr>"
+    st.markdown(f"""<table class="styled"><thead><tr><th>Producto</th><th style="color:{C['cyan']}">PF($TM)</th><th style="color:{C['purple']}">PF(RL)</th><th>MERCADO</th><th>vs Mercado</th><th>rl vs mercado</th><th>rl%</th><th style="color:{C['orange']}">UT0</th><th>vs UT0</th><th>Estado</th><th>% Part.</th></tr></thead><tbody>{rows_html}</tbody></table>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Executive note
@@ -2054,13 +2118,13 @@ with tab10_comex:
     pct_esperado = (TODAY_C.day / days_in_month) * 100
 
     # ─── Static Goals ───────────────────────────────────────────
-    # Vol: Meta 1914 TM, Avance 3081.82 TM
-    # FOB: Meta 4.4M, Avance 7,441,832 USD
+    # Vol: Meta 1800 TM, Avance 1978.33 TM
+    # CFR: Meta 4.4M, Avance 5,016,103.50 USD
     
     meta_vol = 1800.0
-    avance_vol = 2554.25
-    meta_fob = 4400000.0
-    avance_fob = 6634187.50
+    avance_vol = 1978.33
+    meta_cfr = 4400000.0
+    avance_cfr = 5016103.50
 
     gcol1, gcol2 = st.columns(2)
     
@@ -2081,7 +2145,7 @@ with tab10_comex:
         </div>
         <div class="meta-title">Seguimiento de Meta Mensual (TM)</div>
         <div class="meta-vals">
-            <span class="meta-val-main">{avance_vol:,.1f}</span>
+            <span class="meta-val-main">{avance_vol:,.2f}</span>
             <span class="meta-val-sep">/</span>
             <span class="meta-val-goal">{meta_vol:,.0f} TM</span>
         </div>
@@ -2095,32 +2159,32 @@ with tab10_comex:
     </div>
     """, unsafe_allow_html=True)
     
-    # 2. Tracker FOB
-    pct_fob = (avance_fob / meta_fob) * 100
-    status_fob = "SOBRE LO ESPERADO" if pct_fob >= pct_esperado else "BAJO LO ESPERADO"
-    if pct_fob >= 100: status_fob = "META CUMPLIDA"
+    # 2. Tracker CFR
+    pct_cfr = (avance_cfr / meta_cfr) * 100
+    status_cfr = "SOBRE LO ESPERADO" if pct_cfr >= pct_esperado else "BAJO LO ESPERADO"
+    if pct_cfr >= 100: status_cfr = "META CUMPLIDA"
     
-    status_ico_fob = "💰" if pct_fob >= pct_esperado else "⚠️"
-    if pct_fob >= 100: status_ico_fob = "🏆"
+    status_ico_cfr = "💰" if pct_cfr >= pct_esperado else "⚠️"
+    if pct_cfr >= 100: status_ico_cfr = "🏆"
     
-    status_col_fob = C['green'] if pct_fob >= pct_esperado else C['orange']
+    status_col_cfr = C['green'] if pct_cfr >= pct_esperado else C['orange']
     
     gcol2.markdown(f"""
     <div class="meta-container" style="border-color:{C['blue']};">
-        <div class="meta-status-pill" style="background:{status_col_fob}22; color:{status_col_fob};">
-            {status_ico_fob} {status_fob}
+        <div class="meta-status-pill" style="background:{status_col_cfr}22; color:{status_col_cfr};">
+            {status_ico_cfr} {status_cfr}
         </div>
-        <div class="meta-title">Seguimiento de Meta Mensual (USD FOB)</div>
+        <div class="meta-title">Seguimiento de Meta Mensual (USD CFR)</div>
         <div class="meta-vals">
-            <span class="meta-val-main">${avance_fob/1e6:,.2f}M</span>
+            <span class="meta-val-main">${avance_cfr/1e6:,.2f}M</span>
             <span class="meta-val-sep">/</span>
             <span class="meta-val-goal">$4.4M</span>
         </div>
         <div class="meta-progress-bg">
-            <div class="meta-progress-bar" style="width:{min(100, pct_fob)}%; background:{C['blue']};"></div>
+            <div class="meta-progress-bar" style="width:{min(100, pct_cfr)}%; background:{C['blue']};"></div>
         </div>
         <div class="meta-footer">
-            <div class="meta-pct-real" style="color:{C['blue']}">AVANCE REAL: {pct_fob:.1f}%</div>
+            <div class="meta-pct-real" style="color:{C['blue']}">AVANCE REAL: {pct_cfr:.1f}%</div>
             <div class="meta-pct-exp">AVANCE ESPERADO (AL DÍA): {pct_esperado:.1f}%</div>
         </div>
     </div>
