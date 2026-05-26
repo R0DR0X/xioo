@@ -943,14 +943,13 @@ with tab1:
             }
         }
         
-        import datetime
         active_months = []
         for (yr, mth) in RL_VALUES.keys():
-            m_start = datetime.date(yr, mth, 1)
+            m_start = datetime(yr, mth, 1).date()
             if mth == 12:
-                m_end = datetime.date(yr, 12, 31)
+                m_end = datetime(yr, 12, 31).date()
             else:
-                m_end = datetime.date(yr, mth + 1, 1) - datetime.timedelta(days=1)
+                m_end = (datetime(yr, mth + 1, 1) - timedelta(days=1)).date()
             if max(d_start, m_start) <= min(d_end, m_end):
                 active_months.append((yr, mth))
                 
