@@ -331,10 +331,15 @@ def load_rentabilidad():
 
 @st.cache_data
 def load_inventario():
-    import glob
     input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
-    # Auto-detect any inventory excel file in the directory
-    inv_files = glob.glob(os.path.join(input_dir, "*inventario*.xlsx"))
+    if not os.path.exists(input_dir):
+        return {}, pd.DataFrame()
+    # Auto-detect any inventory excel file in the directory case-insensitively
+    inv_files = []
+    for f in os.listdir(input_dir):
+        if "inventario" in f.lower() and f.lower().endswith(".xlsx") and not f.startswith("~$"):
+            inv_files.append(os.path.join(input_dir, f))
+            
     if not inv_files:
         return {}, pd.DataFrame()
     # If multiple, pick the most recently modified
