@@ -334,7 +334,7 @@ def load_inventario():
     import glob
     input_dir = os.path.join(os.path.dirname(__file__), "INPUT")
     # Auto-detect any inventory excel file in the directory
-    inv_files = glob.glob(os.path.join(input_dir, "inventario*.xlsx"))
+    inv_files = glob.glob(os.path.join(input_dir, "*inventario*.xlsx"))
     if not inv_files:
         return {}, pd.DataFrame()
     # If multiple, pick the most recently modified
@@ -342,6 +342,36 @@ def load_inventario():
     
     wb = openpyxl.load_workbook(path, data_only=True)
     
+    # ── New format (Stock Libre sheet) ──
+    if 'Stock Libre' in wb.sheetnames:
+        ws = wb['Stock Libre']
+        rows = []
+        for r in range(2, ws.max_row + 1):
+            prod = ws.cell(r, 1).value
+            if prod is None:
+                continue
+            prod_str = str(prod).strip()
+            if prod_str.upper() == 'TOTAL LIBRE':
+                break
+            
+            tot_stock = ws.cell(r, 14).value # Col N
+            por_emb = ws.cell(r, 15).value   # Col O
+            st_libre = ws.cell(r, 16).value  # Col P
+            
+            rows.append({
+                'PRODUCTO': prod_str,
+                'TOTAL_STOCK': pd.to_numeric(tot_stock, errors='coerce') if tot_stock is not None else 0.0,
+                'POR_EMBARCAR': pd.to_numeric(por_emb, errors='coerce') if por_emb is not None else 0.0,
+                'STOCK_LIBRE': pd.to_numeric(st_libre, errors='coerce') if st_libre is not None else 0.0,
+            })
+        df = pd.DataFrame(rows)
+        # Ensure NaN values are filled with 0
+        df['TOTAL_STOCK'] = df['TOTAL_STOCK'].fillna(0.0)
+        df['POR_EMBARCAR'] = df['POR_EMBARCAR'].fillna(0.0)
+        df['STOCK_LIBRE'] = df['STOCK_LIBRE'].fillna(0.0)
+        wb.close()
+        return {'Stock Libre': df}, df
+        
     all_months = {}  # {month_name: DataFrame}
     
     for sheet_name in wb.sheetnames:
@@ -386,8 +416,6 @@ def load_inventario():
             if col in df_month.columns:
                 df_month[col] = pd.to_numeric(df_month[col], errors='coerce').fillna(0)
         
-        all_months[sheet_name] = df_month
-    
         all_months[sheet_name] = df_month
     
     # Target common sheet names en orden de prioridad (mes más reciente primero)
@@ -1690,39 +1718,77 @@ with tab9:
     st.markdown('<div class="section-title">Inventario de Producto Terminado</div>', unsafe_allow_html=True)
 
     if len(df_inv) > 0:
-        total_stock_kg = df_inv['STOCK_KG'].sum()
-        total_stock_tm = total_stock_kg / 1000
-        n_products = len(df_inv)
-        latest_sheet = list(inv_months.keys())[0] if inv_months else 'Último mes'
-
-        st.markdown(f"""<div class="kpi-row">
-            <div class="kpi-card c1"><div class="kpi-label">STOCK ACTUAL</div><div class="kpi-value">{total_stock_tm:,.1f} TM</div><div class="kpi-sub">{total_stock_kg:,.0f} kg</div></div>
-            <div class="kpi-card c2"><div class="kpi-label">PRODUCTOS EN STOCK</div><div class="kpi-value">{n_products}</div><div class="kpi-sub">Con stock > 0</div></div>
-            <div class="kpi-card c3"><div class="kpi-label">INGRESOS</div><div class="kpi-value">{df_inv['INGRESOS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['INGRESOS'].sum():,.0f} kg</div></div>
-            <div class="kpi-card c4"><div class="kpi-label">SALIDAS</div><div class="kpi-value">{df_inv['SALIDAS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['SALIDAS'].sum():,.0f} kg</div></div>
-        </div>""", unsafe_allow_html=True)
-
-        # Table: show data exactly as-is from latest month, same order as Excel
-        st.markdown('<div class="card-container">', unsafe_allow_html=True)
-        st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">Movimiento de Inventario — {latest_sheet}</b>', unsafe_allow_html=True)
-        rows_inv = ''
-        for _, r in df_inv.iterrows():
-            sap = str(r['CODIGO_SAP']).strip() if r['CODIGO_SAP'] else '—'
-            mat = str(r['MATERIAL'])[:45]
-            # Convert all to TM
-            ini = (r['STOCK_INICIAL'] or 0) / 1000
-            ing = (r['INGRESOS'] or 0) / 1000
-            sal = (r['SALIDAS'] or 0) / 1000
-            fin = (r['STOCK_KG'] or 0) / 1000
-            ini_str = f'{ini:,.2f}' if ini > 0 else '—'
-            ing_str = f'{ing:,.2f}' if ing > 0 else '—'
-            sal_str = f'{sal:,.2f}' if sal > 0 else '—'
-            fin_str = f'{fin:,.2f}'
-            rows_inv += f'<tr><td style="font-size:0.8rem;color:{C["muted"]}">{sap}</td><td>{mat}</td><td style="text-align:right;">{ini_str}</td><td style="text-align:right;color:{C["green"]};">{ing_str}</td><td style="text-align:right;color:{C["red"]};">{sal_str}</td><td style="text-align:right;color:{C["cyan"]};font-weight:700;">{fin_str}</td></tr>'
-        st.markdown(f'<table class="styled"><tr><th>Cód. SAP</th><th>Material</th><th>Stock Inicial (TM)</th><th style="color:{C["green"]}">Ingresos (TM)</th><th style="color:{C["red"]}">Salidas (TM)</th><th style="color:{C["cyan"]}">Stock Final (TM)</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        if 'STOCK_LIBRE' in df_inv.columns:
+            # ── New format (Stock Libre) ──
+            total_stock_kg = df_inv['TOTAL_STOCK'].sum()
+            total_stock_tm = total_stock_kg / 1000
+            
+            total_emb_kg = df_inv['POR_EMBARCAR'].sum()
+            total_emb_tm = total_emb_kg / 1000
+            
+            total_libre_kg = df_inv[df_inv['STOCK_LIBRE'] > 0]['STOCK_LIBRE'].sum()
+            total_libre_tm = total_libre_kg / 1000
+            
+            n_products = len(df_inv[df_inv['TOTAL_STOCK'] > 0])
+            
+            st.markdown(f"""<div class="kpi-row">
+                <div class="kpi-card c1"><div class="kpi-label">TOTAL STOCK</div><div class="kpi-value">{total_stock_tm:,.2f} TM</div><div class="kpi-sub">{total_stock_kg:,.0f} kg</div></div>
+                <div class="kpi-card c2"><div class="kpi-label">POR EMBARCAR</div><div class="kpi-value">{total_emb_tm:,.2f} TM</div><div class="kpi-sub">{total_emb_kg:,.0f} kg</div></div>
+                <div class="kpi-card c3"><div class="kpi-label">STOCK LIBRE</div><div class="kpi-value">{total_libre_tm:,.2f} TM</div><div class="kpi-sub">{total_libre_kg:,.0f} kg</div></div>
+                <div class="kpi-card c4"><div class="kpi-label">PRODUCTOS EN STOCK</div><div class="kpi-value">{n_products}</div><div class="kpi-sub">Con stock > 0</div></div>
+            </div>""", unsafe_allow_html=True)
+            
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">Detalle de Stock Libre de Productos</b>', unsafe_allow_html=True)
+            rows_inv = ''
+            for _, r in df_inv.iterrows():
+                prod = str(r['PRODUCTO']).strip()
+                tot_kg = r['TOTAL_STOCK']
+                emb_kg = r['POR_EMBARCAR']
+                lib_kg = r['STOCK_LIBRE']
+                
+                tot_tm = tot_kg / 1000
+                emb_tm = emb_kg / 1000 if pd.notna(emb_kg) else 0.0
+                lib_tm = lib_kg / 1000 if pd.notna(lib_kg) else 0.0
+                
+                lib_color = C['green'] if lib_tm > 0 else (C['red'] if lib_tm < 0 else C['text'])
+                
+                rows_inv += f'<tr><td>{prod}</td><td style="text-align:right;font-weight:600;">{tot_tm:,.2f} TM</td><td style="text-align:right;color:{C["orange"]};">{emb_tm:,.2f} TM</td><td style="text-align:right;color:{lib_color};font-weight:700;">{lib_tm:,.2f} TM</td></tr>'
+            st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;">Total Stock</th><th style="text-align:right;color:{C["orange"]}">Por Embarcar</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            # ── Old format (Movement) ──
+            total_stock_kg = df_inv['STOCK_KG'].sum()
+            total_stock_tm = total_stock_kg / 1000
+            n_products = len(df_inv)
+            latest_sheet = list(inv_months.keys())[0] if inv_months else 'Último mes'
+            
+            st.markdown(f"""<div class="kpi-row">
+                <div class="kpi-card c1"><div class="kpi-label">STOCK ACTUAL</div><div class="kpi-value">{total_stock_tm:,.1f} TM</div><div class="kpi-sub">{total_stock_kg:,.0f} kg</div></div>
+                <div class="kpi-card c2"><div class="kpi-label">PRODUCTOS EN STOCK</div><div class="kpi-value">{n_products}</div><div class="kpi-sub">Con stock > 0</div></div>
+                <div class="kpi-card c3"><div class="kpi-label">INGRESOS</div><div class="kpi-value">{df_inv['INGRESOS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['INGRESOS'].sum():,.0f} kg</div></div>
+                <div class="kpi-card c4"><div class="kpi-label">SALIDAS</div><div class="kpi-value">{df_inv['SALIDAS'].sum()/1000:,.1f} TM</div><div class="kpi-sub">{df_inv['SALIDAS'].sum():,.0f} kg</div></div>
+            </div>""", unsafe_allow_html=True)
+            
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">Movimiento de Inventario — {latest_sheet}</b>', unsafe_allow_html=True)
+            rows_inv = ''
+            for _, r in df_inv.iterrows():
+                sap = str(r['CODIGO_SAP']).strip() if r['CODIGO_SAP'] else '—'
+                mat = str(r['MATERIAL'])[:45]
+                ini = (r['STOCK_INICIAL'] or 0) / 1000
+                ing = (r['INGRESOS'] or 0) / 1000
+                sal = (r['SALIDAS'] or 0) / 1000
+                fin = (r['STOCK_KG'] or 0) / 1000
+                ini_str = f'{ini:,.2f}' if ini > 0 else '—'
+                ing_str = f'{ing:,.2f}' if ing > 0 else '—'
+                sal_str = f'{sal:,.2f}' if sal > 0 else '—'
+                fin_str = f'{fin:,.2f}'
+                rows_inv += f'<tr><td style="font-size:0.8rem;color:{C["muted"]}">{sap}</td><td>{mat}</td><td style="text-align:right;">{ini_str}</td><td style="text-align:right;color:{C["green"]};">{ing_str}</td><td style="text-align:right;color:{C["red"]};">{sal_str}</td><td style="text-align:right;color:{C["cyan"]};font-weight:700;">{fin_str}</td></tr>'
+            st.markdown(f'<table class="styled"><tr><th>Cód. SAP</th><th>Material</th><th>Stock Inicial (TM)</th><th style="color:{C["green"]}">Ingresos (TM)</th><th style="color:{C["red"]}">Salidas (TM)</th><th style="color:{C["cyan"]}">Stock Final (TM)</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
     else:
-       st.warning("⚠️ **Inventario vacío o fórmulas no calculadas:** No se encontraron productos con stock en el mes actual. Si acabas de subir el Excel desde Drive o un software externo, **ábrelo en tu Excel de escritorio y presiona 'Guardar'**. Esto obliga a Excel a calcular las fórmulas para que el Dashboard pueda leer los valores finales.")
+        st.warning("⚠️ **Inventario vacío o fórmulas no calculadas:** No se encontraron productos con stock. Si acabas de subir el Excel desde Drive o un software externo, **ábrelo en tu Excel de escritorio y presiona 'Guardar'**. Esto obliga a Excel a calcular las fórmulas para que el Dashboard pueda leer los valores finales.")
 
 
 # ═══════════════ TAB 10: RENTABILIDAD ═══════════════════════
