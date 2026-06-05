@@ -661,10 +661,18 @@ def load_resumen_ov():
     """Lee el archivo RESUMEN OV - PRODUCCIÓN.xlsx en INPUT/"""
     base_dir = os.path.dirname(__file__)
     input_dir = os.path.join(base_dir, "INPUT")
-    path = os.path.join(input_dir, "RESUMEN OV - PRODUCCIÓN.xlsx")
     
-    if not os.path.exists(path):
+    # Buscar dinámicamente cualquier variante de RESUMEN OV
+    ov_files = []
+    if os.path.exists(input_dir):
+        for f in os.listdir(input_dir):
+            if 'resumen ov' in f.lower() and f.lower().endswith('.xlsx') and not f.startswith('~$'):
+                ov_files.append(os.path.join(input_dir, f))
+    
+    if not ov_files:
         return None
+        
+    path = max(ov_files, key=os.path.getmtime)
     
     try:
         df = pd.read_excel(path, header=2)
@@ -2192,10 +2200,10 @@ with tab10_comex:
     # CFR: Meta 4.4M, Avance 5,016,103.50 USD
     
     meta_vol = 1800.0
-    avance_vol = 1978.33
+    avance_vol = 103
     meta_cfr = 4400000.0
-    avance_cfr = 5016103.50
-
+    avance_cfr = 236700
+    
     gcol1, gcol2 = st.columns(2)
     
     # 1. Tracker Volumen
@@ -2349,6 +2357,79 @@ with tab10_comex:
             processed.append({**fp_data, 'estado': estado, 'dias': dias,
                                 'pct': pct, 'riesgo': riesgo, 'en_riesgo': en_riesgo, 'fully_ok': fully_ok})
 
+        # ─── TABLA DE EMBARQUES COMEX (PERU FROST 2026) ───────────
+        
+        rows_comex = ""
+        for fp in processed:
+            dias = fp['dias']
+            if fp.get('fully_ok'):
+                badge_bg, badge_col, badge_txt = C['green']+"22", C['green'], "✅ COMPLETADO"
+            elif dias is not None:
+                if dias <= 10:
+                    badge_bg, badge_col, badge_txt = C['red']+"22", C['red'], f"🔴 {dias} DÍAS"
+                elif dias <= 15:
+                    badge_bg, badge_col, badge_txt = C['yellow']+"22", C['yellow'], f"🟡 {dias} DÍAS"
+                else:
+                    badge_bg, badge_col, badge_txt = C['blue']+"22", C['blue'], f"🔵 {dias} DÍAS"
+            else:
+                badge_bg, badge_col, badge_txt = C['muted']+"22", C['muted'], "➖ S/D"
+                
+            eta_html = f'<span class="badge" style="background:{badge_bg};color:{badge_col};">{badge_txt}</span>'
+            
+            doc_html = ""
+            for dk, dl in [('draft','D'),('bl','B'),('sanit','S'),('fact','F'),('co','O'),('cc','C'),('iv','I'),('orig','X')]:
+                state = fp['docs'].get(dk, 'pendiente')
+                if state == 'ok':
+                    color = C['green']
+                elif state == 'proceso':
+                    color = C['orange']
+                else:
+                    color = C['muted'] + "55"
+                doc_html += f'<span style="display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%;background:{color};color:{C["bg"]};font-size:0.5rem;font-weight:bold;margin-right:4px;" title="{dl}">{dl}</span>'
+            
+            obs_txt = fp.get('obs', '')
+            if not obs_txt:
+                obs_txt = '<span style="opacity:0.4;">Sin observaciones</span>'
+                
+            rows_comex += f"""
+<tr style="border-bottom:1px solid {C['border']}44;">
+<td style="padding:12px;font-weight:700;color:{C['cyan']};">{fp['fp']}</td>
+<td style="padding:12px;">{fp['cliente']}</td>
+<td style="padding:12px;">{fp['destino']}</td>
+<td style="padding:12px;text-align:center;">{len(fp['contenedores'])}</td>
+<td style="padding:12px;">{eta_html}</td>
+<td style="padding:12px;text-align:center;font-weight:bold;">{fp['pct']}%</td>
+<td style="padding:12px;">{doc_html}</td>
+<td style="padding:12px;font-size:0.75rem;">{obs_txt}</td>
+</tr>
+"""
+
+        table_html = f"""
+<div class="card-container">
+<div style="color:{C["white"]}; font-size:1.1rem; font-weight:800; margin-bottom:15px;">🚢 TABLA DE CONTROL DE EMBARQUES COMEX (PERU FROST 2026)</div>
+<div style="max-height:500px; overflow-y:auto; margin-top:20px; border-radius:8px; border:1px solid {C['border']};">
+<table class="styled" style="min-width:1100px;border-collapse:collapse;width:100%;">
+<thead style="position:sticky; top:0; background:{C['card2']}; z-index:1;">
+<tr>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">FP</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">CLIENTE</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">DESTINO</th>
+<th style="padding:12px;text-align:center;color:{C['muted']};font-size:0.75rem;">CNTR</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">ETA</th>
+<th style="padding:12px;text-align:center;color:{C['muted']};font-size:0.75rem;">AVANCE</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">CHECKLIST (D,B,S,F,O,C,I,X)</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">OBSERVACIÓN</th>
+</tr>
+</thead>
+<tbody>
+{rows_comex}
+</tbody>
+</table>
+</div>
+</div>
+"""
+        st.markdown(table_html, unsafe_allow_html=True)
+
         # ─── Visual Analysis (Shipments Trend Line) ──────────────────
         st.markdown('<div class="card-container">', unsafe_allow_html=True)
         st.markdown(f'<div style="color:{C["white"]}; font-size:1.1rem; font-weight:800; margin-bottom:15px; display:flex; align-items:center; gap:10px;">📉 TENDENCIA DE EMBARQUES (FPs)</div>', unsafe_allow_html=True)
@@ -2377,8 +2458,7 @@ with tab10_comex:
         # ─── TABLA RESUMEN OV ─────────────────────────────────────
         df_ov = load_resumen_ov()
         if df_ov is not None and not df_ov.empty:
-            st.markdown('<div class="card-container">', unsafe_allow_html=True)
-            st.markdown(f'<div style="color:{C["white"]}; font-size:1.1rem; font-weight:800; margin-bottom:15px;">📋 RESUMEN DE ORDENES DE VENTA (OV)</div>', unsafe_allow_html=True)
+            # Consolidate HTML rendering for OV table
             
             # Filtrar filas vacías o de total antes de calcular
             df_ov_filt = df_ov[df_ov['FP'].notna() & (df_ov['FP'] != '') & (df_ov['ESTADO'] != 'Total general')].copy()
@@ -2401,7 +2481,7 @@ with tab10_comex:
             c_mask = (df_ov_filt['ESTADO'].str.upper() == 'PACKING') & (df_ov_filt['FECHA_DT'] == today_dt)
             c_tn, c_cntr = df_ov_filt[c_mask]['TN'].sum(), df_ov_filt[c_mask]['NFLC'].sum()
 
-            st.markdown(f"""<div class="kpi-row">
+            kpi_html = f"""<div class="kpi-row">
 <div class="kpi-card" style="background:{C['card']}; border-left:5px solid #fcd34d;">
     <div class="kpi-label" style="color:#fcd34d;">PACKING CON RESERVA</div>
     <div class="kpi-value">{a_tn:,.1f} <span style="font-size:0.8rem; opacity:0.6;">TM</span></div>
@@ -2417,7 +2497,7 @@ with tab10_comex:
     <div class="kpi-value">{c_tn:,.1f} <span style="font-size:0.8rem; opacity:0.6;">TM</span></div>
     <div class="kpi-sub">{c_cntr:,.0f} CONTENEDORES</div>
 </div>
-</div>""", unsafe_allow_html=True)
+</div>"""
 
             rows_ov = ""
             # Filtrar filas vacías o de total
@@ -2449,33 +2529,62 @@ with tab10_comex:
                 elif estado == 'PACKING':
                     bg_color = "#fcd34d22" # Amarillo suave
                     border_l = "#fcd34d"
+                elif estado == 'ROLED':
+                    bg_color = "#ef444422" # Rojo suave
+                    border_l = "#ef4444"
+                
+                if estado == 'ROLED':
+                    b_badge = f'<span class="badge badge-red" style="font-size:0.6rem;padding:2px 6px;">ROLED</span>'
+                elif booking and booking.upper() not in ('NAN', 'NONE', '-'):
+                    b_badge = f'<span class="badge" style="background:{C["card2"]};border:1px solid {C["border"]};color:{C["cyan"]};font-family:monospace;">{booking}</span>'
+                else:
+                    b_badge = '<span style="color:#666;font-size:0.7rem;">S/B</span>'
+                
+                f_res_str = f_reserva.strftime('%d/%m') if pd.notna(f_reserva) and hasattr(f_reserva, 'strftime') else '—'
+                f_embarque = r.get('FECHA EMBARQUE')
+                f_emb_str = f_embarque.strftime('%d/%m/%Y') if pd.notna(f_embarque) and hasattr(f_embarque, 'strftime') else '—'
+                
+                rows_ov += f"""
+<tr style="background:{bg_color}; border-left:3px solid {border_l}; border-bottom:1px solid {C['border']}44;">
+<td style="padding:10px 12px;font-weight:700;">{r.get('FP','')}</td>
+<td style="padding:10px 12px;font-size:0.75rem;font-weight:700;">{estado}</td>
+<td style="padding:10px 12px;">{r.get('CLIENTE','')}</td>
+<td style="padding:10px 12px;">{b_badge}</td>
+<td style="padding:10px 12px;">{r.get('DESTINO','')}</td>
+<td style="padding:10px 12px;color:{C['cyan']};font-weight:700;">{f_res_str}</td>
+<td style="padding:10px 12px;">{f_emb_str}</td>
+<td style="padding:10px 12px;text-align:center;font-weight:700;">{r.get('NFLC','')}</td>
+<td style="padding:10px 12px;text-align:right;color:{C['white']};">{r.get('TN','')}</td>
+</tr>
+"""
 
-                rows_ov += f"""<tr style="background:{bg_color}; border-left: 4px solid {border_l};">
-<td style="font-weight:700; font-size:0.8rem;">{estado}</td>
-<td style="font-weight:800; color:{C['cyan']};">{r.get('FP', '')}</td>
-<td style="font-size:0.8rem;">{r.get('PAÍS', '')}</td>
-<td style="font-size:0.8rem;">{r.get('CLIENTE', '')}</td>
-<td style="text-align:center; font-weight:700;">{r.get('NFLC', r.get('N° FCL', ''))}</td>
-<td style="text-align:right; font-weight:800; color:{C['white']};">{r.get('TN', ''):,.1f}</td>
-</tr>"""
-            
-            st.markdown(f"""<div style="overflow-x:auto;">
-<table class="styled" style="width:100%;">
-<thead>
+            ov_full_html = f"""
+<div class="card-container">
+<div style="color:{C["white"]}; font-size:1.1rem; font-weight:800; margin-bottom:15px;">📋 RESUMEN DE ORDENES DE VENTA (OV)</div>
+{kpi_html}
+<div style="max-height:400px; overflow-y:auto; margin-top:20px; border-radius:8px; border:1px solid {C['border']};">
+<table class="styled" style="min-width:1000px; border-collapse:collapse; width:100%;">
+<thead style="position:sticky; top:0; background:{C['card2']}; z-index:1;">
 <tr>
-<th>ESTADO</th>
-<th>FP</th>
-<th>PAÍS</th>
-<th>CLIENTE</th>
-<th>NFLC</th>
-<th style="text-align:right;">TN</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">FP</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">ESTADO</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">CLIENTE</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">BOOKING</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">DESTINO</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">RESERVA</th>
+<th style="padding:12px;text-align:left;color:{C['muted']};font-size:0.75rem;">EMBARQUE</th>
+<th style="padding:12px;text-align:center;color:{C['muted']};font-size:0.75rem;">NFLC</th>
+<th style="padding:12px;text-align:right;color:{C['muted']};font-size:0.75rem;">TN</th>
 </tr>
 </thead>
-<tbody>{rows_ov}</tbody>
+<tbody>
+{rows_ov}
+</tbody>
 </table>
-</div>""", unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
+</div>
+</div>
+"""
+            st.markdown(ov_full_html, unsafe_allow_html=True)
         # ─── Monitor Integral ─────────────────────────────────────
         st.markdown(f"""
         <div style="background:{C['card']};border:1px solid {C['border']};border-radius:14px;
