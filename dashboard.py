@@ -573,14 +573,17 @@ def load_comex_docs():
             elif v == 'CO':       col_map['co']      = c
             elif v == 'CC':       col_map['cc']      = c
             elif v == 'IV':       col_map['iv']      = c
+            elif v == 'OTROS':    col_map['otros']   = c
             elif 'ORIGINAL' in v: col_map['orig']    = c
             elif 'OBSERV' in v:   col_map['obs']     = c
 
-        def _is_ok(val):
-            """True si el documento está aprobado ('ok')."""
+        def _is_ok(val, key=None):
+            """True si el documento está aprobado ('ok'). Si es 'orig', también acepta 'reportado'."""
             if val is None: return False
             s = str(val).strip().lower()
-            return s == 'ok'
+            if s == 'ok': return True
+            if key == 'orig' and 'reportado' in s: return True
+            return False
 
         def _is_pending(val):
             """True si está explícitamente pendiente o vacío."""
@@ -588,11 +591,10 @@ def load_comex_docs():
             s = str(val).strip().lower()
             return s in ('', '-', 'none', 'pendiente', 'n/a')
 
-        def _is_en_proceso(val):
+        def _is_en_proceso(val, key=None):
             """True si tiene fecha u otro valor (ni ok ni pendiente)."""
             if val is None: return False
-            s = str(val).strip().lower()
-            return not _is_ok(val) and not _is_pending(val)
+            return not _is_ok(val, key) and not _is_pending(val)
 
         fps = {}  # fp_key -> dict
         current_fp_key = None
@@ -621,8 +623,8 @@ def load_comex_docs():
                 def _dstat(key, default_col):
                     """Retorna 'ok' | 'proceso' | 'pendiente' para un documento."""
                     v = ws.cell(r, col_map.get(key, default_col)).value
-                    if _is_ok(v):         return 'ok'
-                    if _is_en_proceso(v): return 'proceso'
+                    if _is_ok(v, key):         return 'ok'
+                    if _is_en_proceso(v, key): return 'proceso'
                     return 'pendiente'
 
                 current_fp_key = fp_str
@@ -644,6 +646,7 @@ def load_comex_docs():
                         'co':    _dstat('co',    13),
                         'cc':    _dstat('cc',    14),
                         'iv':    _dstat('iv',    15),
+                        'otros': _dstat('otros', 16),
                         'orig':  _dstat('orig',  17),
                         'orig_raw': str(orig_v).strip() if orig_v else '',
                     },
@@ -2377,7 +2380,7 @@ with tab10_comex:
             eta_html = f'<span class="badge" style="background:{badge_bg};color:{badge_col};">{badge_txt}</span>'
             
             doc_html = ""
-            for dk, dl in [('draft','D'),('bl','B'),('sanit','S'),('fact','F'),('co','O'),('cc','C'),('iv','I'),('orig','X')]:
+            for dk, dl in [('draft','D'),('bl','B'),('sanit','S'),('fact','F'),('co','O'),('cc','C'),('iv','I'),('otros','X')]:
                 state = fp['docs'].get(dk, 'pendiente')
                 if state == 'ok':
                     color = C['green']
@@ -2606,11 +2609,11 @@ with tab10_comex:
                                  key=lambda x: -sum(len(f['contenedores']) for f in x[1]))
 
         # Definir los documentos a mostrar según el usuario
-        # bl sanit fact co cc iv otros (otros es columna Q -> 'orig')
+        # bl sanit fact co cc iv otros (otros es columna P)
         DOCS_LIST = [
             ('bl','BL'), ('sanit','SANITARIO'), ('fact','FACTURA'),
             ('co','C. ORIGEN'), ('cc','COPIA CERT.'), ('iv','ANEXO 4'),
-            ('orig','OTROS (Q)')
+            ('otros','OTROS (P)')
         ]
 
         for cli_name, fps_list in clientes_sorted:
@@ -2767,7 +2770,7 @@ with tab10_comex:
                         </div>""", unsafe_allow_html=True)
 
         with st.expander("📊 Reporte Detallado", expanded=False):
-            DOCS_ALL = ['draft', 'bl', 'sanit', 'fact', 'co', 'cc', 'iv', 'orig']
+            DOCS_ALL = ['draft', 'bl', 'sanit', 'fact', 'co', 'cc', 'iv', 'otros']
             rows_exp = []
             for fp in processed:
                 row = {
