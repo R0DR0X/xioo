@@ -75,10 +75,13 @@ PRODUCT_COLORS = {
 
 # ── UT0 Estáticos (Precio de Equilibrio USD/TM) ──────────────
 UT0_FIXED = {
-    "ALAS COCIDAS": 2892.0,
-    "FILETE COCIDO": 2716.0,
-    "NUCA": 2589.0,
-    "ALAS CONGELADAS": 2472.0,
+    "FILETE CONGELADO": 1983.0,
+    "NUCA": 1325.0,
+    "ALAS CONGELADAS": 2127.0,
+    "TENTACULO": 2846.0,
+    "REPRODUCTOR": 2789.0,
+    "FILETE COCIDO": 3933.0,
+    "ALAS COCIDAS": 4183.0,
 }
 
 PROD_FRESCO = [
@@ -352,16 +355,18 @@ def load_inventario():
         ws = wb['Stock Libre']
         rows = []
         for r in range(2, ws.max_row + 1):
-            prod = ws.cell(r, 1).value
+            prod = ws.cell(r, 2).value # Col B (column 2)
             if prod is None:
                 continue
             prod_str = str(prod).strip()
-            if prod_str.upper() == 'TOTAL LIBRE':
+            if not prod_str:
+                continue
+            if prod_str.upper() in ('TOTAL LIBRE', 'TOTAL'):
                 break
             
-            tot_stock = ws.cell(r, 14).value # Col N
-            por_emb = ws.cell(r, 15).value   # Col O
-            st_libre = ws.cell(r, 16).value  # Col P
+            tot_stock = ws.cell(r, 3).value # Col C (column 3)
+            por_emb = ws.cell(r, 4).value   # Col D (column 4)
+            st_libre = ws.cell(r, 5).value  # Col E (column 5)
             
             rows.append({
                 'PRODUCTO': prod_str,
