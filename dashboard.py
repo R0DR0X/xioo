@@ -75,13 +75,11 @@ PRODUCT_COLORS = {
 
 # ── UT0 Estáticos (Precio de Equilibrio USD/TM) ──────────────
 UT0_FIXED = {
-    "FILETE CONGELADO": 1983.0,
-    "NUCA": 1325.0,
-    "ALAS CONGELADAS": 2127.0,
-    "TENTACULO": 2846.0,
-    "REPRODUCTOR": 2789.0,
-    "FILETE COCIDO": 3933.0,
-    "ALAS COCIDAS": 4183.0,
+    "FILETE CONGELADO": 2380.0,
+    "NUCA": 2017.0,
+    "ALAS CONGELADAS": 2278.0,
+    "TENTACULO": 2136.0,
+    "REPRODUCTOR": 2078.0,
 }
 
 PROD_FRESCO = [
