@@ -664,7 +664,7 @@ def load_comex_docs():
         return [], str(e)
 
 def load_resumen_ov():
-    """Lee el archivo RESUMEN OV - PRODUCCIÓN.xlsx en INPUT/"""
+    """Lee el archivo RESUMEN OV - PRODUCCIÓN.xlsx en INPUT/"""
     base_dir = os.path.dirname(__file__)
     input_dir = os.path.join(base_dir, "INPUT")
     
@@ -692,8 +692,14 @@ def load_resumen_ov():
         print(f"Error loading RESUMEN OV: {e}")
         return None
 
+# ── Últimos 3 meses dinámicos (mes actual, mes-1, mes-2) ──
+MESES_ABBR = {1:'Ene',2:'Feb',3:'Mar',4:'Abr',5:'May',6:'Jun',7:'Jul',8:'Ago',9:'Sep',10:'Oct',11:'Nov',12:'Dic'}
+_mes_actual = datetime.now().month
+ULTIMOS_3_MESES = tuple(((_mes_actual - 3 + i) % 12) + 1 for i in range(3))  # orden cronológico, ej: (5, 6, 7)
+ULTIMOS_3_LABELS = [MESES_ABBR[m] for m in ULTIMOS_3_MESES]                   # ej: ['May', 'Jun', 'Jul']
+
 @st.cache_data
-def get_manual_summary(df, group_col):
+def get_manual_summary(df, group_col, meses):
     if df.empty: 
         return pd.DataFrame()
     
@@ -704,12 +710,14 @@ def get_manual_summary(df, group_col):
         'UTILIDAD NETA': 'sum'
     }).reset_index()
     
-    # 2. Calcular Utilidad Mensual (Ene, Feb, Mar)
+    # 2. Calcular Utilidad de los últimos 3 meses (dinámico)
+    #    meses viene en orden cronológico -> Util_Mes1 = más antiguo, Util_Mes3 = mes actual
+    meses_cols = ['Util_Mes1', 'Util_Mes2', 'Util_Mes3']
     if 'Fecha Embarque' in df.columns:
         df_copy = df.copy()
         df_copy['Mes'] = df_copy['Fecha Embarque'].dt.month
         
-        for m_idx, m_name in [(1, 'Util_Ene'), (2, 'Util_Feb'), (3, 'Util_Mar')]:
+        for m_idx, m_name in zip(meses, meses_cols):
             # Sumar UTILIDAD NETA por mes
             m_sum = df_copy[df_copy['Mes'] == m_idx].groupby(group_col)['UTILIDAD NETA'].sum().reset_index()
             m_sum.columns = [group_col, m_name]
@@ -718,7 +726,7 @@ def get_manual_summary(df, group_col):
     grouped.fillna(0, inplace=True)
     
     # Asegurar que existan columnas mensuales aunque no haya datos
-    for m in ['Util_Ene', 'Util_Feb', 'Util_Mar']:
+    for m in meses_cols:
         if m not in grouped.columns:
             grouped[m] = 0.0
 
@@ -749,8 +757,8 @@ comex_docs, comex_src_path = load_comex_docs()
 
 # UT0_FIXED se definió al inicio del archivo
 
-df_td_prod = get_manual_summary(df_rent, 'Producto')
-df_td_cli = get_manual_summary(df_rent, 'Cliente')
+df_td_prod = get_manual_summary(df_rent, 'Producto', ULTIMOS_3_MESES)
+df_td_cli = get_manual_summary(df_rent, 'Cliente', ULTIMOS_3_MESES)
 
 # Debug info on sidebar to diagnose Streamlit Cloud
 with st.sidebar:
@@ -1213,7 +1221,7 @@ with tab5:
             <div class="metric-card mc4"><div class="mc-label">Posición PF</div><div class="mc-value">#{pf_pos}</div></div>
         </div>""", unsafe_allow_html=True)
 
-        # Bar chart by exporter — use Top 15 from Rankings (Fresco or Cocido)
+        # Bar chart by exporter — use Top 15 from Rankings (Fresco o Cocido)
         is_cocido_prod = selected_prod in PROD_COCIDO
         if is_cocido_prod:
             rank_subset = df_classified[df_classified['PRODUCTO'].isin(PROD_COCIDO)]
@@ -1596,11 +1604,11 @@ with tab8:
             mg = r['MG_Neto']
             mg_color = C['green'] if mg > 0 else C['red']
             u_color = C['green'] if r['Util_Neta'] > 0 else C['red']
-            u_ene = f'${r["Util_Ene"]:,.0f}' if r['Util_Ene'] != 0 else '—'
-            u_feb = f'${r["Util_Feb"]:,.0f}' if r['Util_Feb'] != 0 else '—'
-            u_mar = f'${r["Util_Mar"]:,.0f}' if r['Util_Mar'] != 0 else '—'
-            rows_rc += f'<tr><td>{cli}</td><td style="color:{C["cyan"]};font-weight:700;">{r["TM_Vendidas"]:,.1f}</td><td>{fmt_usd(r["Venta_CFR"])}</td><td>{u_ene}</td><td>{u_feb}</td><td>{u_mar}</td><td style="color:{u_color};font-weight:700;">{fmt_usd(r["Util_Neta"])}</td><td style="color:{mg_color};font-weight:700;">{mg:.1f}%</td></tr>'
-        st.markdown(f'<table class="styled"><tr><th>Cliente</th><th style="color:{C["cyan"]}">TM</th><th>Venta CFR</th><th>Util. Ene</th><th>Util. Feb</th><th>Util. Mar</th><th>Utilidad Neta</th><th>Margen</th></tr>{rows_rc}</table>', unsafe_allow_html=True)
+            u_m1 = f'${r["Util_Mes1"]:,.0f}' if r['Util_Mes1'] != 0 else '—'
+            u_m2 = f'${r["Util_Mes2"]:,.0f}' if r['Util_Mes2'] != 0 else '—'
+            u_m3 = f'${r["Util_Mes3"]:,.0f}' if r['Util_Mes3'] != 0 else '—'
+            rows_rc += f'<tr><td>{cli}</td><td style="color:{C["cyan"]};font-weight:700;">{r["TM_Vendidas"]:,.1f}</td><td>{fmt_usd(r["Venta_CFR"])}</td><td>{u_m1}</td><td>{u_m2}</td><td>{u_m3}</td><td style="color:{u_color};font-weight:700;">{fmt_usd(r["Util_Neta"])}</td><td style="color:{mg_color};font-weight:700;">{mg:.1f}%</td></tr>'
+        st.markdown(f'<table class="styled"><tr><th>Cliente</th><th style="color:{C["cyan"]}">TM</th><th>Venta CFR</th><th>Util. {ULTIMOS_3_LABELS[0]}</th><th>Util. {ULTIMOS_3_LABELS[1]}</th><th>Util. {ULTIMOS_3_LABELS[2]}</th><th>Utilidad Neta</th><th>Margen</th></tr>{rows_rc}</table>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
         # ── Horizontal bar chart: Client profitability ──
@@ -1874,7 +1882,8 @@ with tab10:
             df_det['Fecha Embarque'] = pd.to_datetime(df_det['Fecha Embarque'], errors='coerce')
             df_det = df_det[df_det['Fecha Embarque'].notna()]
             df_det['Mes_N'] = df_det['Fecha Embarque'].dt.month
-            meses_activos = sorted(df_det['Mes_N'].unique().tolist())
+            # Solo los últimos 3 meses dinámicos (mes actual, -1, -2)
+            meses_activos = sorted([m for m in df_det['Mes_N'].unique().tolist() if m in ULTIMOS_3_MESES])
             meses_nombres = {1:'Ene', 2:'Feb', 3:'Mar', 4:'Abr', 5:'May', 6:'Jun', 7:'Jul', 8:'Ago', 9:'Sep', 10:'Oct', 11:'Nov', 12:'Dic'}
             
             items_to_show = sorted([str(i) for i in df_det[row_dim].dropna().unique()])
