@@ -1007,9 +1007,8 @@ with tab1:
             },
             (2026, 7): {
                 "ALAS COCIDAS":  3.296,30,
-                "ALAS CONGELADAS": ,
-                "FILETE COCIDO":  2.887,02 ,
-                "FILETE CONGELADO":  2.033,31 ,
+                "FILETE COCIDO":  2.887,02,
+                "FILETE CONGELADO":  2.033,31,
                 "NUCA":  1.186,07,
                 "REPRODUCTOR":  2.557,47,
                 "TENTACULO":  2.721,30,
