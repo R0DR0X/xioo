@@ -788,7 +788,9 @@ def apply_fob_filter(df, ranges=None):
 def is_pf(name):
     return 'PERU FROST' in str(name).upper()
 
-def fmt_usd(v): return f"${v:,.0f}" if pd.notna(v) else "—"
+def fmt_usd(v):
+    if pd.isna(v): return "—"
+    return f"-${abs(v):,.0f}" if v < 0 else f"${v:,.0f}"
 def fmt_tm(v): return f"{v:,.1f} TM" if pd.notna(v) else "—"
 def fmt_pct(v): return f"{v:.2f}%" if pd.notna(v) else "—"
 
@@ -1639,56 +1641,61 @@ with tab8:
     if len(df_cxc) > 0:
         st.markdown(f'<div class="section-title">Cuentas por Cobrar — Detalle Facturas</div>', unsafe_allow_html=True)
         
-        # Debora Total Neta (Positivos + Negativos)
+        # Deuda Total Neta, Facturas por Cobrar y Saldos a Favor (Negativos)
         cxc_total_neto = df_cxc['Deuda_Pendiente'].sum()
-        facturas_vencidas = df_cxc[df_cxc['Deuda_Pendiente'] > 0]
+        facturas_positivas = df_cxc[df_cxc['Deuda_Pendiente'] > 0]
+        docs_negativos = df_cxc[df_cxc['Deuda_Pendiente'] < 0]
+        
+        cxc_pos_total = facturas_positivas['Deuda_Pendiente'].sum()
+        cxc_neg_total = docs_negativos['Deuda_Pendiente'].sum()
         
         n_docs = len(df_cxc)
-        avg_dias = facturas_vencidas['Dias_Atrasados'].mean() if len(facturas_vencidas) > 0 else 0
-        max_dias = facturas_vencidas['Dias_Atrasados'].max() if len(facturas_vencidas) > 0 else 0
+        n_pos = len(facturas_positivas)
+        n_neg = len(docs_negativos)
         
-        st.markdown(f"""<div class="info-row">
-            <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div></div>
-            <div class="info-card"><div class="info-label">PROMEDIO ATRASO (DÍAS)</div><div class="info-value" style="color:{C['yellow']}">{avg_dias:.0f} días</div></div>
-            <div class="info-card"><div class="info-label">DÍAS MÁX. ATRASO</div><div class="info-value" style="color:{C['red']}">{max_dias:.0f} días</div></div>
-            <div class="info-card"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div></div>
+        avg_dias = facturas_positivas['Dias_Atrasados'].mean() if len(facturas_positivas) > 0 else 0
+        max_dias = facturas_positivas['Dias_Atrasados'].max() if len(facturas_positivas) > 0 else 0
+        
+        st.markdown(f"""<div class="info-row" style="flex-wrap: wrap;">
+            <div class="info-card" style="border-left-color:{C['cyan']}; min-width:180px;"><div class="info-label">SALDO TOTAL NETO</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div><div class="info-sub">Consolidado general</div></div>
+            <div class="info-card" style="border-left-color:{C['orange']}; min-width:180px;"><div class="info-label">TOTAL POR COBRAR</div><div class="info-value" style="color:{C['orange']}">{fmt_usd(cxc_pos_total)}</div><div class="info-sub">{n_pos} facturas pendientes</div></div>
+            <div class="info-card" style="border-left-color:{C['green']}; min-width:180px;"><div class="info-label">SALDO A FAVOR (ANTICIPOS)</div><div class="info-value" style="color:{C['green']}">{fmt_usd(cxc_neg_total)}</div><div class="info-sub">{n_neg} documentos crédito</div></div>
+            <div class="info-card" style="border-left-color:{C['yellow']}; min-width:150px;"><div class="info-label">PROMEDIO ATRASO</div><div class="info-value" style="color:{C['yellow']}">{avg_dias:.0f} días</div><div class="info-sub">Facturas por cobrar</div></div>
+            <div class="info-card" style="border-left-color:{C['red']}; min-width:150px;"><div class="info-label">DÍAS MÁX. ATRASO</div><div class="info-value" style="color:{C['red']}">{max_dias:.0f} días</div><div class="info-sub">Mayor morosidad</div></div>
+            <div class="info-card" style="border-left-color:{C['blue']}; min-width:140px;"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div><div class="info-sub">{n_pos} cobro · {n_neg} favor</div></div>
         </div>""", unsafe_allow_html=True)
 
-        # ── Visualización Ranking de Deuda ──
-        # Ranking solo de deudores netos positivos
+        # ── Visualización Ranking de Deuda y Saldos a Favor ──
         cxc_agg = df_cxc.groupby('Cliente')['Deuda_Pendiente'].sum().reset_index()
-        cxc_agg = cxc_agg[cxc_agg['Deuda_Pendiente'] > 0].sort_values('Deuda_Pendiente', ascending=False).head(10)
-        if not cxc_agg.empty:
+        top_pos = cxc_agg[cxc_agg['Deuda_Pendiente'] > 0].sort_values('Deuda_Pendiente', ascending=False).head(10)
+        neg_cli = cxc_agg[cxc_agg['Deuda_Pendiente'] < 0].sort_values('Deuda_Pendiente', ascending=True)
+        cxc_chart = pd.concat([neg_cli, top_pos]).sort_values('Deuda_Pendiente', ascending=True)
+        
+        if not cxc_chart.empty:
             st.markdown('<div class="card-container">', unsafe_allow_html=True)
-            st.markdown(f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><b style="color:{C["white"]}; font-size:1rem;">Ranking Top 10 — Deuda por Cliente</b><span style="color:{C["gray"]}; font-size:0.8rem;">USD</span></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;"><b style="color:{C["white"]}; font-size:1rem;">Ranking — Deuda y Saldos a Favor por Cliente</b><span style="color:{C["gray"]}; font-size:0.8rem;">USD (🟢 Saldo a Favor | 🔴 Deuda Pendiente)</span></div>', unsafe_allow_html=True)
             
-            # En Plotly horizontal, para que el mayor esté ARRIBA, el dataframe debe estar en orden ASCENDENTE (el último es el más grande y queda arriba)
-            fig_cxc = px.bar(
-                cxc_agg.sort_values('Deuda_Pendiente', ascending=True), 
-                y='Cliente', 
-                x='Deuda_Pendiente', 
+            colors_bar = [C['green'] if v < 0 else (C['red'] if v > 100000 else C['orange']) for v in cxc_chart['Deuda_Pendiente']]
+            fig_cxc = go.Figure(go.Bar(
+                y=cxc_chart['Cliente'].apply(lambda x: str(x)[:35]),
+                x=cxc_chart['Deuda_Pendiente'],
                 orientation='h',
-                color='Deuda_Pendiente',
-                color_continuous_scale='Reds',
-                text_auto='.2s'
-            )
+                marker_color=colors_bar,
+                text=[fmt_usd(v) for v in cxc_chart['Deuda_Pendiente']],
+                textposition='outside',
+                textfont=dict(color=C['white'], size=11),
+                hovertemplate="<b>%{y}</b><br>Saldo: %{text}<extra></extra>"
+            ))
+            fig_cxc.add_vline(x=0, line_color=C['muted'], line_width=1.5, line_dash="dash")
             fig_cxc.update_layout(
                 paper_bgcolor='rgba(0,0,0,0)', 
                 plot_bgcolor='rgba(0,0,0,0)', 
                 font_color=C['text'],
                 showlegend=False,
-                coloraxis_showscale=False,
-                margin=dict(l=0,r=50,t=10,b=10), 
-                height=380,
-                xaxis=dict(gridcolor='rgba(255,255,255,0.05)', tickformat='$,.0f', title=None, zeroline=False),
+                margin=dict(l=0, r=60, t=10, b=10), 
+                height=max(380, len(cxc_chart)*34),
+                xaxis=dict(gridcolor='rgba(255,255,255,0.05)', tickformat='$,.0f', title=None, zeroline=True, zerolinecolor=C['text']),
                 yaxis=dict(title=None, tickfont=dict(size=12, color=C['white']))
-            )
-            fig_cxc.update_traces(
-                hovertemplate="<b>%{y}</b><br>Deuda: $%{x:,.2f}<extra></extra>",
-                textposition='outside',
-                textfont=dict(color=C['white'], size=11),
-                marker_line_color='rgba(0,0,0,0)',
-                marker_line_width=0
             )
             st.plotly_chart(fig_cxc, use_container_width=True, key="cxc_ranking_chart")
             st.markdown('</div>', unsafe_allow_html=True)
@@ -1705,9 +1712,9 @@ with tab8:
         # Encabezado de la "pseudo-tabla"
         accordion_html += f'<div style="display:flex; padding: 10px 16px; font-size: 0.7rem; color:{C["muted"]}; text-transform:uppercase; font-weight:700; letter-spacing:1px;">'
         accordion_html += '<div style="flex:2; padding-left:25px;">Cliente</div>'
-        accordion_html += '<div style="flex:1; text-align:right;">Nro Facturas</div>'
-        accordion_html += '<div style="flex:1; text-align:right;">Deuda Total</div>'
-        accordion_html += '<div style="flex:0.8; text-align:right;">Máx. Atraso</div>'
+        accordion_html += '<div style="flex:1; text-align:right;">Nro Documentos</div>'
+        accordion_html += '<div style="flex:1; text-align:right;">Saldo Total</div>'
+        accordion_html += '<div style="flex:0.8; text-align:right;">Estado / Atraso</div>'
         accordion_html += '</div>'
 
         for i, cliente in enumerate(clientes_ordenados):
@@ -1716,19 +1723,35 @@ with tab8:
             max_atraso = df_cli['Dias_Atrasados'].max()
             n_facturas = len(df_cli)
             
-            # Formateo de alerta de color
-            atraso_color = C['red'] if max_atraso > 30 else (C['yellow'] if max_atraso > 15 else C['text'])
+            # Formateo de alerta de color y texto de estado
+            if deuda_total < 0:
+                amount_color = C['green']
+                atraso_display = f'<span style="color:{C["green"]}; font-weight:600;">Saldo a Favor</span>'
+            else:
+                amount_color = C['cyan']
+                atraso_color = C['red'] if max_atraso > 30 else (C['yellow'] if max_atraso > 15 else C['text'])
+                atraso_display = f'<span style="color:{atraso_color};">{max_atraso:.0f} días</span>'
+                
             item_id = f"cxc_item_{i}"
             
             # Filas de facturas dentro del acordeón
             invoice_rows = ""
             for _, r in df_cli.iterrows():
                 d_atraso = r['Dias_Atrasados']
-                row_style = f"background:rgba(239,68,68,0.05);" if d_atraso > 45 else ""
+                monto_doc = r['Deuda_Pendiente']
+                if monto_doc < 0:
+                    row_style = "background:rgba(34,197,94,0.05);"
+                    monto_style = f"color:{C['green']};"
+                    doc_atraso_txt = f'<span style="color:{C["green"]}; font-weight:600;">Anticipo / Favor</span>'
+                else:
+                    row_style = "background:rgba(239,68,68,0.05);" if d_atraso > 45 else ""
+                    monto_style = ""
+                    doc_atraso_txt = f'<span style="color:{C["red"] if d_atraso > 30 else C["text"]};">{d_atraso:.0f} días</span>'
+                    
                 invoice_rows += f'<tr style="{row_style}">'
                 invoice_rows += f'<td style="color:{C["gray"]};">#{str(r["N_Doc"]).strip()}</td>'
-                invoice_rows += f'<td style="text-align:right; font-weight:600;">{fmt_usd(r["Deuda_Pendiente"])}</td>'
-                invoice_rows += f'<td style="text-align:right; color:{C["red"] if d_atraso > 30 else C["text"]};">{d_atraso:.0f} días</td>'
+                invoice_rows += f'<td style="text-align:right; font-weight:600; {monto_style}">{fmt_usd(monto_doc)}</td>'
+                invoice_rows += f'<td style="text-align:right;">{doc_atraso_txt}</td>'
                 invoice_rows += '</tr>'
 
             accordion_html += f'<div class="cxc-item">'
@@ -1736,13 +1759,13 @@ with tab8:
             accordion_html += f'<label class="cxc-header" for="{item_id}">'
             accordion_html += f'<span class="chevron">▶</span>'
             accordion_html += f'<div class="cxc-col-client">{cliente[:35]}</div>'
-            accordion_html += f'<div class="cxc-col-info">{n_facturas} fact.</div>'
-            accordion_html += f'<div class="cxc-col-amount">{fmt_usd(deuda_total)}</div>'
-            accordion_html += f'<div class="cxc-col-days" style="color:{atraso_color};">{max_atraso:.0f} días</div>'
+            accordion_html += f'<div class="cxc-col-info">{n_facturas} doc(s)</div>'
+            accordion_html += f'<div class="cxc-col-amount" style="color:{amount_color};">{fmt_usd(deuda_total)}</div>'
+            accordion_html += f'<div class="cxc-col-days">{atraso_display}</div>'
             accordion_html += f'</label>'
             accordion_html += f'<div class="cxc-content">'
             accordion_html += f'<table class="cxc-invoice-table">'
-            accordion_html += f'<thead><tr><th>Documento</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Atraso</th></tr></thead>'
+            accordion_html += f'<thead><tr><th>Documento</th><th style="text-align:right;">Monto</th><th style="text-align:right;">Estado / Atraso</th></tr></thead>'
             accordion_html += f'<tbody>{invoice_rows}</tbody>'
             accordion_html += f'</table></div></div>'
             
