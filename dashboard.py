@@ -1651,7 +1651,7 @@ with tab8:
         max_dias = facturas_positivas['Dias_Atrasados'].max() if len(facturas_positivas) > 0 else 0
         
         st.markdown(f"""<div class="info-row">
-            <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div><div class="info-sub">Excl. Yantai Hongchang</div></div>
+            <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div></div>
             <div class="info-card"><div class="info-label">PROMEDIO ATRASO (DÍAS)</div><div class="info-value" style="color:{C['yellow']}">{avg_dias:.0f} días</div></div>
             <div class="info-card"><div class="info-label">DÍAS MÁX. ATRASO</div><div class="info-value" style="color:{C['red']}">{max_dias:.0f} días</div></div>
             <div class="info-card"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div></div>
