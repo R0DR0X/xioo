@@ -1641,16 +1641,17 @@ with tab8:
     if len(df_cxc) > 0:
         st.markdown(f'<div class="section-title">Cuentas por Cobrar — Detalle Facturas</div>', unsafe_allow_html=True)
         
-        # Deuda Total Neta (Positivos + Negativos)
-        cxc_total_neto = df_cxc['Deuda_Pendiente'].sum()
-        facturas_positivas = df_cxc[df_cxc['Deuda_Pendiente'] > 0]
+        # Deuda Total Neta (Excluyendo Yantai Hongchang para el cálculo de KPI)
+        df_cxc_kpi = df_cxc[~df_cxc['Cliente'].str.upper().str.contains('YANTAI HONGCHANG', na=False)]
+        cxc_total_neto = df_cxc_kpi['Deuda_Pendiente'].sum()
+        facturas_positivas = df_cxc_kpi[df_cxc_kpi['Deuda_Pendiente'] > 0]
         
-        n_docs = len(df_cxc)
+        n_docs = len(df_cxc_kpi)
         avg_dias = facturas_positivas['Dias_Atrasados'].mean() if len(facturas_positivas) > 0 else 0
         max_dias = facturas_positivas['Dias_Atrasados'].max() if len(facturas_positivas) > 0 else 0
         
         st.markdown(f"""<div class="info-row">
-            <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div></div>
+            <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div><div class="info-sub">Excl. Yantai Hongchang</div></div>
             <div class="info-card"><div class="info-label">PROMEDIO ATRASO (DÍAS)</div><div class="info-value" style="color:{C['yellow']}">{avg_dias:.0f} días</div></div>
             <div class="info-card"><div class="info-label">DÍAS MÁX. ATRASO</div><div class="info-value" style="color:{C['red']}">{max_dias:.0f} días</div></div>
             <div class="info-card"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div></div>
