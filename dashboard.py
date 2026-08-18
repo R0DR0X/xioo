@@ -1641,28 +1641,19 @@ with tab8:
     if len(df_cxc) > 0:
         st.markdown(f'<div class="section-title">Cuentas por Cobrar — Detalle Facturas</div>', unsafe_allow_html=True)
         
-        # Deuda Total Neta, Facturas por Cobrar y Saldos a Favor (Negativos)
+        # Deuda Total Neta (Positivos + Negativos)
         cxc_total_neto = df_cxc['Deuda_Pendiente'].sum()
         facturas_positivas = df_cxc[df_cxc['Deuda_Pendiente'] > 0]
-        docs_negativos = df_cxc[df_cxc['Deuda_Pendiente'] < 0]
-        
-        cxc_pos_total = facturas_positivas['Deuda_Pendiente'].sum()
-        cxc_neg_total = docs_negativos['Deuda_Pendiente'].sum()
         
         n_docs = len(df_cxc)
-        n_pos = len(facturas_positivas)
-        n_neg = len(docs_negativos)
-        
         avg_dias = facturas_positivas['Dias_Atrasados'].mean() if len(facturas_positivas) > 0 else 0
         max_dias = facturas_positivas['Dias_Atrasados'].max() if len(facturas_positivas) > 0 else 0
         
-        st.markdown(f"""<div class="info-row" style="flex-wrap: wrap;">
-            <div class="info-card" style="border-left-color:{C['cyan']}; min-width:180px;"><div class="info-label">SALDO TOTAL NETO</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div><div class="info-sub">Consolidado general</div></div>
-            <div class="info-card" style="border-left-color:{C['orange']}; min-width:180px;"><div class="info-label">TOTAL POR COBRAR</div><div class="info-value" style="color:{C['orange']}">{fmt_usd(cxc_pos_total)}</div><div class="info-sub">{n_pos} facturas pendientes</div></div>
-            <div class="info-card" style="border-left-color:{C['green']}; min-width:180px;"><div class="info-label">SALDO A FAVOR (ANTICIPOS)</div><div class="info-value" style="color:{C['green']}">{fmt_usd(cxc_neg_total)}</div><div class="info-sub">{n_neg} documentos crédito</div></div>
-            <div class="info-card" style="border-left-color:{C['yellow']}; min-width:150px;"><div class="info-label">PROMEDIO ATRASO</div><div class="info-value" style="color:{C['yellow']}">{avg_dias:.0f} días</div><div class="info-sub">Facturas por cobrar</div></div>
-            <div class="info-card" style="border-left-color:{C['red']}; min-width:150px;"><div class="info-label">DÍAS MÁX. ATRASO</div><div class="info-value" style="color:{C['red']}">{max_dias:.0f} días</div><div class="info-sub">Mayor morosidad</div></div>
-            <div class="info-card" style="border-left-color:{C['blue']}; min-width:140px;"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div><div class="info-sub">{n_pos} cobro · {n_neg} favor</div></div>
+        st.markdown(f"""<div class="info-row">
+            <div class="info-card"><div class="info-label">SALDO TOTAL NETO (USD)</div><div class="info-value">{fmt_usd(cxc_total_neto)}</div></div>
+            <div class="info-card"><div class="info-label">PROMEDIO ATRASO (DÍAS)</div><div class="info-value" style="color:{C['yellow']}">{avg_dias:.0f} días</div></div>
+            <div class="info-card"><div class="info-label">DÍAS MÁX. ATRASO</div><div class="info-value" style="color:{C['red']}">{max_dias:.0f} días</div></div>
+            <div class="info-card"><div class="info-label">DOCUMENTOS TOTALES</div><div class="info-value">{n_docs}</div></div>
         </div>""", unsafe_allow_html=True)
 
         # ── Visualización Ranking de Deuda y Saldos a Favor ──
