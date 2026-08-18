@@ -1006,6 +1006,12 @@ with tab1:
                 "NUCA": 1242.35,
                 "REPRODUCTOR": 2680.06,
                 "TENTACULO": 2694.02,
+            },
+            (2026, 7): {
+                "FILETE CONGELADO": 1965.13,
+                "NUCA":  1200.92,
+                "REPRODUCTOR":  2708.80,
+                "TENTACULO": 2624.46,
             }
         }
         
