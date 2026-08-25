@@ -1012,7 +1012,12 @@ with tab1:
                 "NUCA":  1200.92,
                 "REPRODUCTOR":  2708.80,
                 "TENTACULO": 2624.46,
-            }
+            },
+            (2026, 8): {
+                "ALAS CONGELADAS": 2096.30,
+                "NUCA":  3309.74,
+                "TENTACULO": 2796.46,
+}
         }
         
         active_months = []
