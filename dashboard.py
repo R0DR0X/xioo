@@ -1015,8 +1015,8 @@ with tab1:
             },
             (2026, 8): {
                 "ALAS CONGELADAS": 2096.30,
-                "NUCA":  3309.74,
-                "TENTACULO": 2796.46,
+                "NUCA":  1205.50,
+                "TENTACULO": 2662.96,
 }
         }
         
