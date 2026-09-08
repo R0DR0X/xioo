@@ -3,9 +3,75 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import os, warnings, openpyxl, re, calendar
-from inventario_utils import find_sheet, parse_resumen_inventario
+import os, sys, warnings, openpyxl, re, calendar
+
+# Ensure current working directory / repo root is in sys.path for Streamlit Cloud
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BASE_DIR not in sys.path:
+    sys.path.insert(0, _BASE_DIR)
+
+try:
+    from inventario_utils import find_sheet, parse_resumen_inventario
+except Exception:
+    def find_sheet(sheetnames, target):
+        wanted = target.strip().lower()
+        for name in sheetnames:
+            if name.strip().lower() == wanted:
+                return name
+        return None
+
+    def parse_resumen_inventario(wb):
+        resumen_sheet = None
+        for name in wb.sheetnames:
+            if 'resumen' in name.strip().lower():
+                resumen_sheet = name
+                break
+        if not resumen_sheet:
+            return None
+        ws = wb[resumen_sheet]
+        planta_rows, china_rows, total_rows = [], [], []
+        current_section = None
+        for r in range(1, ws.max_row + 1):
+            c_val = ws.cell(r, 3).value
+            d_val = ws.cell(r, 4).value
+            row_text = ' '.join(str(ws.cell(r, c).value or '') for c in range(1, 12)).upper()
+            if 'RENTABILIDAD DEL INVENTARIO' in row_text:
+                current_section = 'PLANTA'; continue
+            elif 'YANTAI' in row_text or 'CHINA' in row_text or 'ALMACÉN DE' in row_text or 'ALMACEN DE' in row_text:
+                current_section = 'CHINA'; continue
+            elif 'INVENTARIO TOTAL VALORIZADO' in row_text:
+                current_section = 'TOTAL'; continue
+            c_str = str(c_val).strip() if c_val is not None else ''
+            if not c_str or c_str.upper() in ('PRODUCTO', 'PERU FROST') or 'AVANCE COMERCIAL' in c_str.upper():
+                continue
+            if c_str.upper() == 'TOTAL':
+                if current_section == 'PLANTA': current_section = None
+                elif current_section == 'CHINA': current_section = None
+                elif current_section == 'TOTAL': break
+                continue
+            tm_val = pd.to_numeric(d_val, errors='coerce')
+            tm_val = 0.0 if pd.isna(tm_val) else float(tm_val)
+            item = {'PRODUCTO': c_str, 'STOCK_LIBRE_TM': tm_val}
+            if current_section == 'PLANTA': planta_rows.append(item)
+            elif current_section == 'CHINA': china_rows.append(item)
+            elif current_section == 'TOTAL': total_rows.append(item)
+        df_planta = pd.DataFrame(planta_rows)
+        df_china = pd.DataFrame(china_rows)
+        df_total = pd.DataFrame(total_rows)
+        tot_planta = float(df_planta['STOCK_LIBRE_TM'].sum()) if not df_planta.empty else 0.0
+        tot_china = float(df_china['STOCK_LIBRE_TM'].sum()) if not df_china.empty else 0.0
+        tot_total = float(df_total['STOCK_LIBRE_TM'].sum()) if not df_total.empty else (tot_planta + tot_china)
+        df_p = df_planta.rename(columns={'STOCK_LIBRE_TM': 'STOCK_PLANTA_TM'}) if not df_planta.empty else pd.DataFrame(columns=['PRODUCTO', 'STOCK_PLANTA_TM'])
+        df_c = df_china.rename(columns={'STOCK_LIBRE_TM': 'STOCK_CHINA_TM'}) if not df_china.empty else pd.DataFrame(columns=['PRODUCTO', 'STOCK_CHINA_TM'])
+        df_unified = pd.merge(df_p, df_c, on='PRODUCTO', how='outer').fillna(0.0)
+        if 'STOCK_PLANTA_TM' not in df_unified.columns: df_unified['STOCK_PLANTA_TM'] = 0.0
+        if 'STOCK_CHINA_TM' not in df_unified.columns: df_unified['STOCK_CHINA_TM'] = 0.0
+        df_unified['STOCK_TOTAL_TM'] = df_unified['STOCK_PLANTA_TM'] + df_unified['STOCK_CHINA_TM']
+        df_unified = df_unified.sort_values('STOCK_TOTAL_TM', ascending=False).reset_index(drop=True)
+        return {'planta': df_planta, 'china': df_china, 'total': df_total, 'unified': df_unified, 'tot_planta': tot_planta, 'tot_china': tot_china, 'tot_total': tot_total}
+
 warnings.filterwarnings('ignore')
+
 
 # ── Page Config ──────────────────────────────────────────────
 st.set_page_config(page_title="PERU FROST SAC — Dashboard Ejecutivo", layout="wide", page_icon="🦑")
