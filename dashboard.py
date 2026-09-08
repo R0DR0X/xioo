@@ -2280,7 +2280,7 @@ with tab11:
     db = df_classified.copy()
     db['Año'] = db['Fecha'].dt.year
     db['Mes'] = db['Fecha'].dt.month_name()
-    db['Es_PF'] = db['Exportador'].apply(is_pf)
+    db['Es_PF'] = db['Exportador'].apply(is_pf).astype(bool) if not db.empty else pd.Series(dtype=bool)
 
     # Select columns for display
     db_display = db[['Fecha','Año','Mes','Exportador','Importador','Pais de Destino','PRODUCTO','PARTIDA_TIPO','TM','Kg Neto','U$ FOB Tot','USD_TM']].copy()
