@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os, warnings, openpyxl, re, calendar
+from inventario_utils import find_sheet
 warnings.filterwarnings('ignore')
 
 # ── Page Config ──────────────────────────────────────────────
@@ -349,8 +350,9 @@ def load_inventario():
     wb = openpyxl.load_workbook(path, data_only=True)
     
     # ── New format (Stock Libre sheet) ──
-    if 'Stock Libre' in wb.sheetnames:
-        ws = wb['Stock Libre']
+    stock_libre_sheet = find_sheet(wb.sheetnames, 'Stock Libre')
+    if stock_libre_sheet:
+        ws = wb[stock_libre_sheet]
         rows = []
         for r in range(2, ws.max_row + 1):
             prod = ws.cell(r, 2).value # Col B (column 2)
