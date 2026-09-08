@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os, warnings, openpyxl, re, calendar
-from inventario_utils import find_sheet
+from inventario_utils import find_sheet, parse_resumen_inventario
 warnings.filterwarnings('ignore')
 
 # ── Page Config ──────────────────────────────────────────────
@@ -348,6 +348,7 @@ def load_inventario():
     path = max(inv_files, key=os.path.getmtime)
     
     wb = openpyxl.load_workbook(path, data_only=True)
+    resumen_data = parse_resumen_inventario(wb)
     
     # ── New format (Stock Libre sheet) ──
     stock_libre_sheet = find_sheet(wb.sheetnames, 'Stock Libre')
@@ -380,7 +381,11 @@ def load_inventario():
         df['POR_EMBARCAR'] = df['POR_EMBARCAR'].fillna(0.0)
         df['STOCK_LIBRE'] = df['STOCK_LIBRE'].fillna(0.0)
         wb.close()
-        return {'Stock Libre': df}, df
+        return {'Stock Libre': df, 'resumen': resumen_data}, df
+    elif resumen_data:
+        wb.close()
+        return {'resumen': resumen_data}, pd.DataFrame()
+
         
     all_months = {}  # {month_name: DataFrame}
     
@@ -1781,9 +1786,79 @@ with tab8:
 with tab9:
     st.markdown('<div class="section-title">Inventario de Producto Terminado</div>', unsafe_allow_html=True)
 
-    if len(df_inv) > 0:
+    resumen_data = inv_months.get('resumen') if isinstance(inv_months, dict) else None
+
+    if resumen_data and (not resumen_data['planta'].empty or not resumen_data['china'].empty):
+        tot_planta_tm = resumen_data['tot_planta']
+        tot_china_tm = resumen_data['tot_china']
+        tot_libre_tm = resumen_data['tot_total']
+        
+        total_stock_tm = (df_inv['TOTAL_STOCK'].sum() / 1000) if (len(df_inv) > 0 and 'TOTAL_STOCK' in df_inv.columns) else 0.0
+        total_emb_tm = (df_inv['POR_EMBARCAR'].sum() / 1000) if (len(df_inv) > 0 and 'POR_EMBARCAR' in df_inv.columns) else 0.0
+
+        st.markdown(f"""<div class="kpi-row">
+            <div class="kpi-card c1"><div class="kpi-label">STOCK LIBRE TOTAL</div><div class="kpi-value">{tot_libre_tm:,.2f} TM</div><div class="kpi-sub">Planta + China</div></div>
+            <div class="kpi-card c2"><div class="kpi-label">STOCK LIBRE PLANTA</div><div class="kpi-value">{tot_planta_tm:,.2f} TM</div><div class="kpi-sub">Paita / Perú</div></div>
+            <div class="kpi-card c3"><div class="kpi-label">STOCK LIBRE CHINA</div><div class="kpi-value">{tot_china_tm:,.2f} TM</div><div class="kpi-sub">Almacén Yantai Jiahong</div></div>
+            <div class="kpi-card c4"><div class="kpi-label">POR EMBARCAR</div><div class="kpi-value">{total_emb_tm:,.2f} TM</div><div class="kpi-sub">Comprometido</div></div>
+        </div>""", unsafe_allow_html=True)
+
+        col_p, col_c = st.columns(2)
+        with col_p:
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">🏭 Stock Libre — Planta ({tot_planta_tm:,.2f} TM)</b>', unsafe_allow_html=True)
+            rows_p = ''
+            for _, r in resumen_data['planta'].iterrows():
+                prod = str(r['PRODUCTO']).strip()
+                tm = r['STOCK_LIBRE_TM']
+                color = C['green'] if tm > 0 else C['text']
+                rows_p += f'<tr><td>{prod}</td><td style="text-align:right;color:{color};font-weight:700;">{tm:,.2f} TM</td></tr>'
+            st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre</th></tr>{rows_p}</table>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with col_c:
+            st.markdown('<div class="card-container">', unsafe_allow_html=True)
+            st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">🇨🇳 Stock Libre — China / Yantai ({tot_china_tm:,.2f} TM)</b>', unsafe_allow_html=True)
+            rows_c = ''
+            for _, r in resumen_data['china'].iterrows():
+                prod = str(r['PRODUCTO']).strip()
+                tm = r['STOCK_LIBRE_TM']
+                color = C['green'] if tm > 0 else C['text']
+                rows_c += f'<tr><td>{prod}</td><td style="text-align:right;color:{color};font-weight:700;">{tm:,.2f} TM</td></tr>'
+            st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre</th></tr>{rows_c}</table>', unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        if not resumen_data['total'].empty:
+            with st.expander("🌐 Ver Consolidado Total Valorizado"):
+                st.markdown('<div class="card-container">', unsafe_allow_html=True)
+                rows_t = ''
+                for _, r in resumen_data['total'].iterrows():
+                    prod = str(r['PRODUCTO']).strip()
+                    tm = r['STOCK_LIBRE_TM']
+                    color = C['green'] if tm > 0 else C['text']
+                    rows_t += f'<tr><td>{prod}</td><td style="text-align:right;color:{color};font-weight:700;">{tm:,.2f} TM</td></tr>'
+                st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre Total</th></tr>{rows_t}</table>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        if len(df_inv) > 0 and 'STOCK_LIBRE' in df_inv.columns:
+            with st.expander("🔍 Ver Detalle de Stock Físico y Por Embarcar (SKU Planta)"):
+                st.markdown('<div class="card-container">', unsafe_allow_html=True)
+                rows_inv = ''
+                for _, r in df_inv.iterrows():
+                    prod = str(r['PRODUCTO']).strip()
+                    tot_kg = r['TOTAL_STOCK']
+                    emb_kg = r['POR_EMBARCAR']
+                    lib_kg = r['STOCK_LIBRE']
+                    tot_tm = tot_kg / 1000
+                    emb_tm = emb_kg / 1000 if pd.notna(emb_kg) else 0.0
+                    lib_tm = lib_kg / 1000 if pd.notna(lib_kg) else 0.0
+                    lib_color = C['green'] if lib_tm > 0 else (C['red'] if lib_tm < 0 else C['text'])
+                    rows_inv += f'<tr><td>{prod}</td><td style="text-align:right;font-weight:600;">{tot_tm:,.2f} TM</td><td style="text-align:right;color:{C["orange"]};">{emb_tm:,.2f} TM</td><td style="text-align:right;color:{lib_color};font-weight:700;">{lib_tm:,.2f} TM</td></tr>'
+                st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;">Total Stock</th><th style="text-align:right;color:{C["orange"]}">Por Embarcar</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+    elif len(df_inv) > 0:
         if 'STOCK_LIBRE' in df_inv.columns:
-            # ── New format (Stock Libre) ──
+            # ── Fallback format (Stock Libre) ──
             total_stock_kg = df_inv['TOTAL_STOCK'].sum()
             total_stock_tm = total_stock_kg / 1000
             
@@ -1820,6 +1895,7 @@ with tab9:
                 rows_inv += f'<tr><td>{prod}</td><td style="text-align:right;font-weight:600;">{tot_tm:,.2f} TM</td><td style="text-align:right;color:{C["orange"]};">{emb_tm:,.2f} TM</td><td style="text-align:right;color:{lib_color};font-weight:700;">{lib_tm:,.2f} TM</td></tr>'
             st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;">Total Stock</th><th style="text-align:right;color:{C["orange"]}">Por Embarcar</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre</th></tr>{rows_inv}</table>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
+
         else:
             # ── Old format (Movement) ──
             total_stock_kg = df_inv['STOCK_KG'].sum()
