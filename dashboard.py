@@ -859,7 +859,10 @@ def apply_fob_filter(df, ranges=None):
 
 
 def is_pf(name):
+    if isinstance(name, pd.Series):
+        return name.astype(str).str.contains('PERU FROST', case=False, na=False)
     return 'PERU FROST' in str(name).upper()
+
 
 def fmt_usd(v):
     if pd.isna(v): return "—"
@@ -934,11 +937,10 @@ df_dated = df_raw[(df_raw['Fecha'].dt.date >= d_start) & (df_raw['Fecha'].dt.dat
 df = apply_fob_filter(df_dated, user_ranges)
 
 # Subsets
-df_pf = df[df['Exportador'].apply(is_pf)]
-df_fresco = df[df['PRODUCTO'].isin(PROD_FRESCO)]
-df_cocido = df[df['PRODUCTO'].isin(PROD_COCIDO)]
-df_classified = df[df['PRODUCTO'].notna() & (df['PRODUCTO']!='')]
-df_classified = df[df['PRODUCTO'].notna() & (df['PRODUCTO']!='')]
+df_pf = df[df['Exportador'].apply(is_pf).astype(bool)] if not df.empty else pd.DataFrame(columns=df.columns)
+df_fresco = df[df['PRODUCTO'].isin(PROD_FRESCO)] if not df.empty else pd.DataFrame(columns=df.columns)
+df_cocido = df[df['PRODUCTO'].isin(PROD_COCIDO)] if not df.empty else pd.DataFrame(columns=df.columns)
+df_classified = df[df['PRODUCTO'].notna() & (df['PRODUCTO']!='')] if not df.empty else pd.DataFrame(columns=df.columns)
 
 # ── Header Banner ────────────────────────────────────────────
 period_str = f"{d_start.strftime('%b %Y')} — {d_end.strftime('%b %Y')}" if d_start != d_end else d_start.strftime('%B %Y')
@@ -1017,17 +1019,20 @@ with tab1:
     all_products = sorted(df_classified['PRODUCTO'].unique())
     rows_html = ""
     for prod in all_products:
-        prod_df = df_classified[df_classified['PRODUCTO']==prod]
-        pf_prod = prod_df[prod_df['Exportador'].apply(is_pf)]
-        pf_kg = pf_prod['Kg Neto'].sum()
+        prod_df = df_classified[df_classified['PRODUCTO']==prod] if not df_classified.empty else pd.DataFrame(columns=df_classified.columns)
+        pf_prod = prod_df[prod_df['Exportador'].apply(is_pf).astype(bool)] if not prod_df.empty else pd.DataFrame(columns=prod_df.columns)
+        pf_kg = pf_prod['Kg Neto'].sum() if ('Kg Neto' in pf_prod.columns and not pf_prod.empty) else 0
+        pf_fob = pf_prod['U$ FOB Tot'].sum() if ('U$ FOB Tot' in pf_prod.columns and not pf_prod.empty) else 0
         pf_pct_tm = (pf_kg / peso_neto_pf * 100) if peso_neto_pf > 0 else 0
-        pf_utm = (pf_prod['U$ FOB Tot'].sum() / pf_kg * 1000) if pf_kg>0 else None
+        pf_utm = (pf_fob / pf_kg * 1000) if pf_kg > 0 else None
         
         # UT0 lookup
         ut0 = UT0_FIXED.get(prod)
         if prod == "REPRODUCTOR": ut0 = UT0_FIXED.get("REPRODUCTOR")
         
-        mkt_utm = (prod_df['U$ FOB Tot'].sum() / prod_df['Kg Neto'].sum() * 1000) if prod_df['Kg Neto'].sum()>0 else None
+        mkt_kg = prod_df['Kg Neto'].sum() if ('Kg Neto' in prod_df.columns and not prod_df.empty) else 0
+        mkt_fob = prod_df['U$ FOB Tot'].sum() if ('U$ FOB Tot' in prod_df.columns and not prod_df.empty) else 0
+        mkt_utm = (mkt_fob / mkt_kg * 1000) if mkt_kg > 0 else None
         
         # Rentabilidad calculation (PF(RL)) - Static real values for 2026 filtered by overlapping month date range
         RL_VALUES = {
@@ -1288,12 +1293,17 @@ with tab5:
     selected_prod = st.selectbox("Seleccionar Producto", all_prods, key="prod_select")
 
     if selected_prod:
-        prod_data = df_classified[df_classified['PRODUCTO']==selected_prod]
-        pf_prod = prod_data[prod_data['Exportador'].apply(is_pf)]
-        mkt_no_pf = prod_data[~prod_data['Exportador'].apply(is_pf)]
+        prod_data = df_classified[df_classified['PRODUCTO']==selected_prod] if not df_classified.empty else pd.DataFrame(columns=df_classified.columns)
+        pf_prod = prod_data[prod_data['Exportador'].apply(is_pf).astype(bool)] if not prod_data.empty else pd.DataFrame(columns=prod_data.columns)
+        mkt_no_pf = prod_data[~prod_data['Exportador'].apply(is_pf).astype(bool)] if not prod_data.empty else pd.DataFrame(columns=prod_data.columns)
 
-        pf_utm_val = (pf_prod['U$ FOB Tot'].sum()/pf_prod['Kg Neto'].sum()*1000) if pf_prod['Kg Neto'].sum()>0 else 0
-        mkt_utm_val = (prod_data['U$ FOB Tot'].sum()/prod_data['Kg Neto'].sum()*1000) if prod_data['Kg Neto'].sum()>0 else 0
+        pf_kg = pf_prod['Kg Neto'].sum() if ('Kg Neto' in pf_prod.columns and not pf_prod.empty) else 0
+        pf_fob = pf_prod['U$ FOB Tot'].sum() if ('U$ FOB Tot' in pf_prod.columns and not pf_prod.empty) else 0
+        pf_utm_val = (pf_fob / pf_kg * 1000) if pf_kg > 0 else 0
+
+        mkt_kg = prod_data['Kg Neto'].sum() if ('Kg Neto' in prod_data.columns and not prod_data.empty) else 0
+        mkt_fob = prod_data['U$ FOB Tot'].sum() if ('U$ FOB Tot' in prod_data.columns and not prod_data.empty) else 0
+        mkt_utm_val = (mkt_fob / mkt_kg * 1000) if mkt_kg > 0 else 0
         ut0_val = UT0_FIXED.get(selected_prod) or 0
 
         # Rankings for this product
@@ -1443,10 +1453,14 @@ with tab5:
     st.markdown(f'<b style="color:{C["white"]};">Comparativo UT0 vs PERU FROST vs Mercado — Todos los Productos</b>', unsafe_allow_html=True)
     comp_data = []
     for p in all_prods:
-        pd_p = df_classified[df_classified['PRODUCTO']==p]
-        pf_p = pd_p[pd_p['Exportador'].apply(is_pf)]
-        pf_v = (pf_p['U$ FOB Tot'].sum()/pf_p['Kg Neto'].sum()*1000) if pf_p['Kg Neto'].sum()>0 else 0
-        mk_v = (pd_p['U$ FOB Tot'].sum()/pd_p['Kg Neto'].sum()*1000) if pd_p['Kg Neto'].sum()>0 else 0
+        pd_p = df_classified[df_classified['PRODUCTO']==p] if not df_classified.empty else pd.DataFrame(columns=df_classified.columns)
+        pf_p = pd_p[pd_p['Exportador'].apply(is_pf).astype(bool)] if not pd_p.empty else pd.DataFrame(columns=pd_p.columns)
+        pf_kg = pf_p['Kg Neto'].sum() if ('Kg Neto' in pf_p.columns and not pf_p.empty) else 0
+        pf_fob = pf_p['U$ FOB Tot'].sum() if ('U$ FOB Tot' in pf_p.columns and not pf_p.empty) else 0
+        pf_v = (pf_fob / pf_kg * 1000) if pf_kg > 0 else 0
+        pd_kg = pd_p['Kg Neto'].sum() if ('Kg Neto' in pd_p.columns and not pd_p.empty) else 0
+        pd_fob = pd_p['U$ FOB Tot'].sum() if ('U$ FOB Tot' in pd_p.columns and not pd_p.empty) else 0
+        mk_v = (pd_fob / pd_kg * 1000) if pd_kg > 0 else 0
         
         # Get specialized UT0
         ut_v = UT0_FIXED.get(p)
@@ -1483,9 +1497,9 @@ with tab6:
     
     if selected_prod_t6:
         # Filter by product
-        df_hist_prod = df_hist_cl[df_hist_cl['PRODUCTO'] == selected_prod_t6]
-        df_hist_pf = df_hist_prod[df_hist_prod['Exportador'].apply(is_pf)]
-        df_hist_mkt = df_hist_prod[~df_hist_prod['Exportador'].apply(is_pf)]
+        df_hist_prod = df_hist_cl[df_hist_cl['PRODUCTO'] == selected_prod_t6] if not df_hist_cl.empty else pd.DataFrame(columns=df_hist_cl.columns)
+        df_hist_pf = df_hist_prod[df_hist_prod['Exportador'].apply(is_pf).astype(bool)] if not df_hist_prod.empty else pd.DataFrame(columns=df_hist_prod.columns)
+        df_hist_mkt = df_hist_prod[~df_hist_prod['Exportador'].apply(is_pf).astype(bool)] if not df_hist_prod.empty else pd.DataFrame(columns=df_hist_prod.columns)
     
         # Monthly aggregations PF
         monthly_pf = df_hist_pf.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
@@ -1558,33 +1572,38 @@ with tab7:
     prods_avail = sorted(df_comp_cl['PRODUCTO'].unique())
     selected_prod_t5 = st.selectbox("Seleccionar Producto", prods_avail, key="top5_prod")
 
-    df_prod = df_comp_cl[df_comp_cl['PRODUCTO']==selected_prod_t5]
+    df_prod = df_comp_cl[df_comp_cl['PRODUCTO']==selected_prod_t5] if not df_comp_cl.empty else pd.DataFrame(columns=df_comp_cl.columns)
     # PF data
-    df_prod_pf = df_prod[df_prod['Exportador'].apply(is_pf)]
+    df_prod_pf = df_prod[df_prod['Exportador'].apply(is_pf).astype(bool)] if not df_prod.empty else pd.DataFrame(columns=df_prod.columns)
     # Top 5 competitors (by Volume/Tonnes, excluding PF)
-    df_prod_comp = df_prod[~df_prod['Exportador'].apply(is_pf)]
-    top5_exp = df_prod_comp.groupby('Exportador')['Kg Neto'].sum().nlargest(5).index.tolist()
+    df_prod_comp = df_prod[~df_prod['Exportador'].apply(is_pf).astype(bool)] if not df_prod.empty else pd.DataFrame(columns=df_prod.columns)
+    top5_exp = df_prod_comp.groupby('Exportador')['Kg Neto'].sum().nlargest(5).index.tolist() if ('Kg Neto' in df_prod_comp.columns and not df_prod_comp.empty) else []
 
     # Multi-line chart: price evolution PF vs Top 5
     st.markdown('<div class="card-container">', unsafe_allow_html=True)
     st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">{selected_prod_t5} — Evolución Precio USD/TM (12 Meses)</b>', unsafe_allow_html=True)
     fig_t5 = go.Figure()
     # PF line (thick cyan)
-    pf_monthly = df_prod_pf.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
-    pf_monthly['USD_TM'] = (pf_monthly['U$ FOB Tot']/pf_monthly['Kg Neto']*1000).fillna(0)
-    pf_monthly['mes_str'] = pf_monthly['MES'].astype(str)
-    if len(pf_monthly) > 0:
-        fig_t5.add_trace(go.Scatter(x=pf_monthly['mes_str'], y=pf_monthly['USD_TM'], name='PERU FROST',
-            line=dict(color=C['cyan'], width=4), mode='lines+markers', marker=dict(size=9)))
+    if not df_prod_pf.empty and 'U$ FOB Tot' in df_prod_pf.columns and 'Kg Neto' in df_prod_pf.columns:
+        pf_monthly = df_prod_pf.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
+        pf_monthly['USD_TM'] = (pf_monthly['U$ FOB Tot']/pf_monthly['Kg Neto']*1000).fillna(0)
+        pf_monthly['mes_str'] = pf_monthly['MES'].astype(str)
+        if len(pf_monthly) > 0:
+            fig_t5.add_trace(go.Scatter(x=pf_monthly['mes_str'], y=pf_monthly['USD_TM'], name='PERU FROST',
+                line=dict(color=C['cyan'], width=4), mode='lines+markers', marker=dict(size=9)))
+    else:
+        pf_monthly = pd.DataFrame(columns=['MES', 'U$ FOB Tot', 'Kg Neto', 'USD_TM', 'mes_str'])
 
     comp_colors = [C['orange'], C['red'], '#a855f7', C['yellow'], C['green']]
     for i, exp in enumerate(top5_exp):
-        exp_data = df_prod_comp[df_prod_comp['Exportador']==exp].groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
-        exp_data['USD_TM'] = (exp_data['U$ FOB Tot']/exp_data['Kg Neto']*1000).fillna(0)
-        exp_data['mes_str'] = exp_data['MES'].astype(str)
-        short_name = str(exp)[:25]
-        fig_t5.add_trace(go.Scatter(x=exp_data['mes_str'], y=exp_data['USD_TM'], name=short_name,
-            line=dict(color=comp_colors[i % len(comp_colors)], width=2, dash='dot'), mode='lines+markers', marker=dict(size=5)))
+        exp_data = df_prod_comp[df_prod_comp['Exportador']==exp] if not df_prod_comp.empty else pd.DataFrame(columns=df_prod_comp.columns)
+        if not exp_data.empty and 'U$ FOB Tot' in exp_data.columns and 'Kg Neto' in exp_data.columns:
+            exp_data_grp = exp_data.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
+            exp_data_grp['USD_TM'] = (exp_data_grp['U$ FOB Tot']/exp_data_grp['Kg Neto']*1000).fillna(0)
+            exp_data_grp['mes_str'] = exp_data_grp['MES'].astype(str)
+            short_name = str(exp)[:25]
+            fig_t5.add_trace(go.Scatter(x=exp_data_grp['mes_str'], y=exp_data_grp['USD_TM'], name=short_name,
+                line=dict(color=comp_colors[i % len(comp_colors)], width=2, dash='dot'), mode='lines+markers', marker=dict(size=5)))
 
     fig_t5.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color=C['text'],
         legend=dict(orientation='h', y=-0.25, font=dict(size=10)), margin=dict(l=0,r=0,t=10,b=70), height=450,
@@ -1594,13 +1613,16 @@ with tab7:
     st.markdown('</div>', unsafe_allow_html=True)
 
     # Current filter price comparison bar chart
-    df_prod_filter = df[df['PRODUCTO']==selected_prod_t5]
-    last_by_exp = df_prod_filter.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
-    last_by_exp['USD_TM'] = (last_by_exp['U$ FOB Tot']/last_by_exp['Kg Neto']*1000).fillna(0)
-    
-    # Only keep Top 5 + PF for this chart
-    last_by_exp = last_by_exp[last_by_exp['Exportador'].isin(top5_exp) | last_by_exp['Exportador'].apply(is_pf)]
-    last_by_exp = last_by_exp.sort_values('USD_TM', ascending=True)
+    df_prod_filter = df[df['PRODUCTO']==selected_prod_t5] if not df.empty else pd.DataFrame(columns=df.columns)
+    if not df_prod_filter.empty and 'U$ FOB Tot' in df_prod_filter.columns and 'Kg Neto' in df_prod_filter.columns:
+        last_by_exp = df_prod_filter.groupby('Exportador').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'}).reset_index()
+        last_by_exp['USD_TM'] = (last_by_exp['U$ FOB Tot']/last_by_exp['Kg Neto']*1000).fillna(0)
+        
+        # Only keep Top 5 + PF for this chart
+        last_by_exp = last_by_exp[last_by_exp['Exportador'].isin(top5_exp) | last_by_exp['Exportador'].apply(is_pf).astype(bool)]
+        last_by_exp = last_by_exp.sort_values('USD_TM', ascending=True)
+    else:
+        last_by_exp = pd.DataFrame(columns=['Exportador', 'U$ FOB Tot', 'Kg Neto', 'USD_TM'])
 
     # Color: PF = cyan, others = gradient
     colors_bar = []
@@ -1624,23 +1646,36 @@ with tab7:
     st.markdown(f'<b style="color:{C["white"]};">Comparativo Top 5 vs PERU FROST — {selected_prod_t5}</b>', unsafe_allow_html=True)
     
     # PF Metrics
-    pf_df_filter = df_prod_filter[df_prod_filter['Exportador'].apply(is_pf)]
-    pf_usd_filter = (pf_df_filter['U$ FOB Tot'].sum() / pf_df_filter['Kg Neto'].sum() * 1000) if pf_df_filter['Kg Neto'].sum()>0 else 0
-    pf_usd_12m = (pf_monthly['U$ FOB Tot'].sum() / pf_monthly['Kg Neto'].sum() * 1000) if pf_monthly['Kg Neto'].sum()>0 else 0
-    pf_active = len(pf_monthly[pf_monthly['U$ FOB Tot']>0])
+    pf_df_filter = df_prod_filter[df_prod_filter['Exportador'].apply(is_pf).astype(bool)] if not df_prod_filter.empty else pd.DataFrame(columns=df_prod_filter.columns)
+    pf_kg = pf_df_filter['Kg Neto'].sum() if ('Kg Neto' in pf_df_filter.columns and not pf_df_filter.empty) else 0
+    pf_fob = pf_df_filter['U$ FOB Tot'].sum() if ('U$ FOB Tot' in pf_df_filter.columns and not pf_df_filter.empty) else 0
+    pf_usd_filter = (pf_fob / pf_kg * 1000) if pf_kg > 0 else 0
+
+    pf_kg_12m = pf_monthly['Kg Neto'].sum() if ('Kg Neto' in pf_monthly.columns and not pf_monthly.empty) else 0
+    pf_fob_12m = pf_monthly['U$ FOB Tot'].sum() if ('U$ FOB Tot' in pf_monthly.columns and not pf_monthly.empty) else 0
+    pf_usd_12m = (pf_fob_12m / pf_kg_12m * 1000) if pf_kg_12m > 0 else 0
+    pf_active = len(pf_monthly[pf_monthly['U$ FOB Tot']>0]) if ('U$ FOB Tot' in pf_monthly.columns and not pf_monthly.empty) else 0
     
     rows_t5 = f'<tr style="background:rgba(0,255,204,0.1);"><td style="color:{C["cyan"]};font-weight:800;">PERU FROST</td><td style="color:{C["cyan"]};font-weight:800;">${pf_usd_filter:,.0f}</td><td style="color:{C["muted"]}">${pf_usd_12m:,.0f}</td><td style="color:{C["muted"]}">{pf_active}/12</td><td>—</td></tr>'
     
     for exp in top5_exp:
         # Filtered data
-        exp_filter = df_prod_filter[df_prod_filter['Exportador']==exp]
-        exp_usd_filter = (exp_filter['U$ FOB Tot'].sum() / exp_filter['Kg Neto'].sum() * 1000) if exp_filter['Kg Neto'].sum()>0 else 0
+        exp_filter = df_prod_filter[df_prod_filter['Exportador']==exp] if not df_prod_filter.empty else pd.DataFrame(columns=df_prod_filter.columns)
+        exp_kg = exp_filter['Kg Neto'].sum() if ('Kg Neto' in exp_filter.columns and not exp_filter.empty) else 0
+        exp_fob = exp_filter['U$ FOB Tot'].sum() if ('U$ FOB Tot' in exp_filter.columns and not exp_filter.empty) else 0
+        exp_usd_filter = (exp_fob / exp_kg * 1000) if exp_kg > 0 else 0
         
         # 12M data
-        exp_12m = df_prod_comp[df_prod_comp['Exportador']==exp]
-        exp_12m_grp = exp_12m.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'})
-        meses_act = len(exp_12m_grp[exp_12m_grp['U$ FOB Tot'] > 0])
-        exp_usd_12m = (exp_12m['U$ FOB Tot'].sum() / exp_12m['Kg Neto'].sum() * 1000) if exp_12m['Kg Neto'].sum()>0 else 0
+        exp_12m = df_prod_comp[df_prod_comp['Exportador']==exp] if not df_prod_comp.empty else pd.DataFrame(columns=df_prod_comp.columns)
+        if not exp_12m.empty and 'U$ FOB Tot' in exp_12m.columns and 'Kg Neto' in exp_12m.columns:
+            exp_12m_grp = exp_12m.groupby('MES').agg({'U$ FOB Tot':'sum','Kg Neto':'sum'})
+            meses_act = len(exp_12m_grp[exp_12m_grp['U$ FOB Tot'] > 0])
+            exp_12m_kg = exp_12m['Kg Neto'].sum()
+            exp_12m_fob = exp_12m['U$ FOB Tot'].sum()
+            exp_usd_12m = (exp_12m_fob / exp_12m_kg * 1000) if exp_12m_kg > 0 else 0
+        else:
+            meses_act = 0
+            exp_usd_12m = 0
         
         # Difference vs PF in the period
         diff = exp_usd_filter - pf_usd_filter 
@@ -2278,15 +2313,19 @@ with tab11:
     st.markdown(f'<div style="color:{C["muted"]};font-size:0.8rem;margin-bottom:12px;">Cruce integral: Precios, UT0, Márgenes y Rankings por producto</div>', unsafe_allow_html=True)
 
     # Build consolidated table
-    pf_data = df_classified[df_classified['Exportador'].apply(is_pf)]
+    pf_data = df_classified[df_classified['Exportador'].apply(is_pf).astype(bool)] if not df_classified.empty else pd.DataFrame(columns=df_classified.columns)
     all_data = df_classified
-    prods_consol = sorted(pf_data[pf_data['PRODUCTO'].notna() & (pf_data['PRODUCTO']!='')]['PRODUCTO'].unique())
+    prods_consol = sorted(pf_data[pf_data['PRODUCTO'].notna() & (pf_data['PRODUCTO']!='')]['PRODUCTO'].unique()) if not pf_data.empty else []
     rows_consol = ""
     for prod in prods_consol:
-        pf_p = pf_data[pf_data['PRODUCTO']==prod]
-        all_p = all_data[all_data['PRODUCTO']==prod]
-        pf_utm = pf_p['U$ FOB Tot'].sum()/pf_p['Kg Neto'].sum()*1000 if pf_p['Kg Neto'].sum()>0 else 0
-        mkt_utm = all_p['U$ FOB Tot'].sum()/all_p['Kg Neto'].sum()*1000 if all_p['Kg Neto'].sum()>0 else 0
+        pf_p = pf_data[pf_data['PRODUCTO']==prod] if not pf_data.empty else pd.DataFrame(columns=pf_data.columns)
+        all_p = all_data[all_data['PRODUCTO']==prod] if not all_data.empty else pd.DataFrame(columns=all_data.columns)
+        pf_kg = pf_p['Kg Neto'].sum() if ('Kg Neto' in pf_p.columns and not pf_p.empty) else 0
+        pf_fob = pf_p['U$ FOB Tot'].sum() if ('U$ FOB Tot' in pf_p.columns and not pf_p.empty) else 0
+        pf_utm = (pf_fob / pf_kg * 1000) if pf_kg > 0 else 0
+        all_kg = all_p['Kg Neto'].sum() if ('Kg Neto' in all_p.columns and not all_p.empty) else 0
+        all_fob = all_p['U$ FOB Tot'].sum() if ('U$ FOB Tot' in all_p.columns and not all_p.empty) else 0
+        mkt_utm = (all_fob / all_kg * 1000) if all_kg > 0 else 0
         
         # UT0 ESTÁTICO (REVERTIDO)
         ut0 = UT0_FIXED.get(prod)
