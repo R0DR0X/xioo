@@ -1803,42 +1803,23 @@ with tab9:
             <div class="kpi-card c4"><div class="kpi-label">POR EMBARCAR</div><div class="kpi-value">{total_emb_tm:,.2f} TM</div><div class="kpi-sub">Comprometido</div></div>
         </div>""", unsafe_allow_html=True)
 
-        col_p, col_c = st.columns(2)
-        with col_p:
-            st.markdown('<div class="card-container">', unsafe_allow_html=True)
-            st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">🏭 Stock Libre — Planta ({tot_planta_tm:,.2f} TM)</b>', unsafe_allow_html=True)
-            rows_p = ''
-            for _, r in resumen_data['planta'].iterrows():
-                prod = str(r['PRODUCTO']).strip()
-                tm = r['STOCK_LIBRE_TM']
-                color = C['green'] if tm > 0 else C['text']
-                rows_p += f'<tr><td>{prod}</td><td style="text-align:right;color:{color};font-weight:700;">{tm:,.2f} TM</td></tr>'
-            st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre</th></tr>{rows_p}</table>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="card-container">', unsafe_allow_html=True)
+        st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">📦 Detalle de Stock Libre por Producto (Planta vs China)</b>', unsafe_allow_html=True)
+        rows_u = ''
+        df_u = resumen_data.get('unified', pd.DataFrame())
+        for _, r in df_u.iterrows():
+            prod = str(r['PRODUCTO']).strip()
+            p_tm = r['STOCK_PLANTA_TM']
+            c_tm = r['STOCK_CHINA_TM']
+            tot_tm = r['STOCK_TOTAL_TM']
+            p_color = C['green'] if p_tm > 0 else C['text']
+            c_color = C['green'] if c_tm > 0 else C['text']
+            tot_color = C['cyan'] if tot_tm > 0 else C['text']
+            rows_u += f'<tr><td>{prod}</td><td style="text-align:right;color:{p_color};font-weight:600;">{p_tm:,.2f} TM</td><td style="text-align:right;color:{c_color};font-weight:600;">{c_tm:,.2f} TM</td><td style="text-align:right;color:{tot_color};font-weight:700;">{tot_tm:,.2f} TM</td></tr>'
+        rows_u += f'<tr style="border-top:2px solid {C["border"]};font-weight:800;"><td>TOTAL</td><td style="text-align:right;color:{C["green"]};">{tot_planta_tm:,.2f} TM</td><td style="text-align:right;color:{C["green"]};">{tot_china_tm:,.2f} TM</td><td style="text-align:right;color:{C["cyan"]};">{tot_libre_tm:,.2f} TM</td></tr>'
+        st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;color:{C["orange"]}">Stock Libre Planta</th><th style="text-align:right;color:{C["orange"]}">Stock Libre China</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre Total</th></tr>{rows_u}</table>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        with col_c:
-            st.markdown('<div class="card-container">', unsafe_allow_html=True)
-            st.markdown(f'<b style="color:{C["white"]};font-size:1.05rem;">🇨🇳 Stock Libre — China / Yantai ({tot_china_tm:,.2f} TM)</b>', unsafe_allow_html=True)
-            rows_c = ''
-            for _, r in resumen_data['china'].iterrows():
-                prod = str(r['PRODUCTO']).strip()
-                tm = r['STOCK_LIBRE_TM']
-                color = C['green'] if tm > 0 else C['text']
-                rows_c += f'<tr><td>{prod}</td><td style="text-align:right;color:{color};font-weight:700;">{tm:,.2f} TM</td></tr>'
-            st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre</th></tr>{rows_c}</table>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-        if not resumen_data['total'].empty:
-            with st.expander("🌐 Ver Consolidado Total Valorizado"):
-                st.markdown('<div class="card-container">', unsafe_allow_html=True)
-                rows_t = ''
-                for _, r in resumen_data['total'].iterrows():
-                    prod = str(r['PRODUCTO']).strip()
-                    tm = r['STOCK_LIBRE_TM']
-                    color = C['green'] if tm > 0 else C['text']
-                    rows_t += f'<tr><td>{prod}</td><td style="text-align:right;color:{color};font-weight:700;">{tm:,.2f} TM</td></tr>'
-                st.markdown(f'<table class="styled"><tr><th>Producto</th><th style="text-align:right;color:{C["cyan"]}">Stock Libre Total</th></tr>{rows_t}</table>', unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
 
         if len(df_inv) > 0 and 'STOCK_LIBRE' in df_inv.columns:
             with st.expander("🔍 Ver Detalle de Stock Físico y Por Embarcar (SKU Planta)"):

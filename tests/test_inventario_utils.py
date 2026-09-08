@@ -65,6 +65,10 @@ def test_parse_resumen_inventario_extracts_planta_and_china():
     assert len(res['planta']) == 2
     assert len(res['china']) == 1
     assert len(res['total']) == 2
+    assert 'unified' in res
+    assert len(res['unified']) == 2
+    assert res['unified']['STOCK_TOTAL_TM'].sum() == 350.5
+
 
 
 def test_parse_resumen_inventario_returns_none_without_sheet():

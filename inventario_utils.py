@@ -85,12 +85,24 @@ def parse_resumen_inventario(wb):
     tot_china = float(df_china['STOCK_LIBRE_TM'].sum()) if not df_china.empty else 0.0
     tot_total = float(df_total['STOCK_LIBRE_TM'].sum()) if not df_total.empty else (tot_planta + tot_china)
 
+    df_p = df_planta.rename(columns={'STOCK_LIBRE_TM': 'STOCK_PLANTA_TM'}) if not df_planta.empty else pd.DataFrame(columns=['PRODUCTO', 'STOCK_PLANTA_TM'])
+    df_c = df_china.rename(columns={'STOCK_LIBRE_TM': 'STOCK_CHINA_TM'}) if not df_china.empty else pd.DataFrame(columns=['PRODUCTO', 'STOCK_CHINA_TM'])
+    df_unified = pd.merge(df_p, df_c, on='PRODUCTO', how='outer').fillna(0.0)
+    if 'STOCK_PLANTA_TM' not in df_unified.columns:
+        df_unified['STOCK_PLANTA_TM'] = 0.0
+    if 'STOCK_CHINA_TM' not in df_unified.columns:
+        df_unified['STOCK_CHINA_TM'] = 0.0
+    df_unified['STOCK_TOTAL_TM'] = df_unified['STOCK_PLANTA_TM'] + df_unified['STOCK_CHINA_TM']
+    df_unified = df_unified.sort_values('STOCK_TOTAL_TM', ascending=False).reset_index(drop=True)
+
     return {
         'planta': df_planta,
         'china': df_china,
         'total': df_total,
+        'unified': df_unified,
         'tot_planta': tot_planta,
         'tot_china': tot_china,
         'tot_total': tot_total,
     }
+
 
