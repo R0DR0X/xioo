@@ -1092,10 +1092,16 @@ with tab1:
                 "TENTACULO": 2624.46,
             },
             (2026, 8): {
-                "ALAS CONGELADAS": 2096.30,
-                "NUCA":  1205.50,
+                "ALAS CONGELADAS": 1709.74,
+                "NUCA":  1650.83,
                 "TENTACULO": 2662.96,
-}
+            },
+            (2026, 9): {
+                "FILETE CONGELADO": 1579.74,
+                "NUCA":  1212.20,
+                "REPRODUCTOR":  2487.89,
+                "TENTACULO": 2603.70,
+            }
         }
         
         active_months = []
