@@ -1101,6 +1101,13 @@ with tab1:
                 "NUCA":  1212.20,
                 "REPRODUCTOR":  2487.89,
                 "TENTACULO": 2603.70,
+            },
+            (2026, 10): {
+                "ALAS CONGELADAS": 1618.73,
+                "FILETE COCIDO": 3074.86,
+                "FILETE CONGELADO": 1600.00,
+                "NUCA": 1284.00,
+                "REPRODUCTOR": 2413.08,
             }
         }
         
