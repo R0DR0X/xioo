@@ -1105,8 +1105,8 @@ with tab1:
             },
             (2026, 10): {
                 "ALAS CONGELADAS": 1570.99,
-                "ALAS COCIDAS":  3528*,
-                "FILETE COCIDO": 3550*,
+                "ALAS COCIDAS":  3528,
+                "FILETE COCIDO": 3550,
                 "NUCA": 1284.00,
                 "REPRODUCTOR": 2426.15,
             },
